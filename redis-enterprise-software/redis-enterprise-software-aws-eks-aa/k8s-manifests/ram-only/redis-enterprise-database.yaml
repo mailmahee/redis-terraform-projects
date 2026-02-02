@@ -1,0 +1,165 @@
+#==============================================================================
+# REDIS ENTERPRISE DATABASE - RAM-ONLY MODE
+#==============================================================================
+# This example creates a Redis database using RAM-only storage
+# (no Redis Flex / Auto Tiering)
+#
+# REQUIREMENTS:
+# - Redis Enterprise Cluster must be running (STATE=Running)
+# - Cluster must have sufficient available memory
+#
+# USAGE:
+#   kubectl apply -f redis-enterprise-database.yaml
+#
+# VERIFY:
+#   kubectl get redb -n redis-enterprise
+#   kubectl get svc -n redis-enterprise
+#==============================================================================
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseDatabase
+metadata:
+  name: demo
+  namespace: redis-enterprise
+spec:
+  #============================================================================
+  # CLUSTER REFERENCE
+  #============================================================================
+  # Must match the RedisEnterpriseCluster name
+  redisEnterpriseCluster:
+    name: redis-ent-eks
+
+  #============================================================================
+  # DATABASE MEMORY
+  #============================================================================
+  # RAM-only mode: All data stored in memory
+  memorySize: 1GB  # Total database memory (100MB minimum)
+
+  #============================================================================
+  # DATABASE PORT
+  #============================================================================
+  # Port range: 10000-19999
+  databasePort: 12000
+
+  #============================================================================
+  # HIGH AVAILABILITY
+  #============================================================================
+  # Enable replication for HA (recommended for production)
+  replication: true  # Creates replica shards for failover
+
+  #============================================================================
+  # PERSISTENCE
+  #============================================================================
+  # Snapshot-based persistence (AOF also available)
+  persistence: snapshotEvery1Hour
+  # Options:
+  #   - disabled
+  #   - snapshotEvery1Hour
+  #   - snapshotEvery6Hour
+  #   - snapshotEvery12Hour
+  #   - aofEverySecond
+  #   - aofEvery1Second
+
+  #============================================================================
+  # DATABASE PASSWORD
+  #============================================================================
+  # Recommended: Use Kubernetes secret for production
+  # Create secret:
+  #   kubectl create secret generic demo-password \
+  #     --from-literal=password=YourDatabasePassword \
+  #     -n redis-enterprise
+  #
+  # Then uncomment:
+  # databaseSecretName: demo-password
+
+  # Or set password directly (not recommended for production):
+  # redisPassword: "YourDatabasePassword"
+
+  #============================================================================
+  # EVICTION POLICY
+  #============================================================================
+  # What happens when memory limit is reached
+  evictionPolicy: volatile-lru
+  # Options:
+  #   - volatile-lru: Remove least recently used keys with TTL
+  #   - allkeys-lru: Remove least recently used keys
+  #   - volatile-ttl: Remove keys with shortest TTL
+  #   - volatile-random: Remove random keys with TTL
+  #   - allkeys-random: Remove random keys
+  #   - noeviction: Return errors when memory full
+
+  #============================================================================
+  # SHARDING
+  #============================================================================
+  # Number of database shards (1 = single shard)
+  shardCount: 1
+
+  #============================================================================
+  # TLS/SSL (Optional)
+  #============================================================================
+  # Uncomment to enable TLS encryption
+  # tlsMode: enabled
+  # clientAuthenticationCertificates: my-cert-secret
+
+  #============================================================================
+  # REDIS VERSION (Optional)
+  #============================================================================
+  # Specify Redis OSS version (leave empty for cluster default)
+  # redisVersion: "7.2"
+
+  #============================================================================
+  # REDIS MODULES (Optional)
+  #============================================================================
+  # Uncomment to enable Redis modules
+  # modulesList:
+  #   - name: RedisJSON
+  #     version: 2.6.6
+  #   - name: RedisSearch
+  #     version: 2.8.4
+  #   - name: RedisBloom
+  #     version: 2.6.3
+  #   - name: RedisTimeSeries
+  #     version: 1.10.4
+
+  #============================================================================
+  # BACKUP (Optional)
+  #============================================================================
+  # Uncomment to enable automated backups
+  # backup:
+  #   interval: 24  # Hours between backups
+  #   s3:
+  #     awsSecretName: my-s3-credentials
+  #     bucketName: my-backup-bucket
+  #     subdir: redis-backups
+
+  #============================================================================
+  # RACK AWARENESS (Optional)
+  #============================================================================
+  # Ensure replicas are in different availability zones
+  # rackAware: true
+
+#==============================================================================
+# NOTES
+#==============================================================================
+#
+# 1. After deployment, check database status:
+#    kubectl get redb demo -n redis-enterprise
+#
+# 2. Wait for STATUS=active (takes 1-2 minutes)
+#
+# 3. Get database endpoint:
+#    kubectl get svc demo -n redis-enterprise
+#    # Service name: demo.redis-enterprise.svc.cluster.local:12000
+#
+# 4. Access via port-forward (for testing):
+#    kubectl port-forward -n redis-enterprise svc/demo 12000:12000
+#    redis-cli -h localhost -p 12000 -a YourPassword
+#
+# 5. Or access from within the cluster:
+#    redis-cli -h demo.redis-enterprise.svc.cluster.local -p 12000 -a YourPassword
+#
+# 6. Memory calculation for RAM-only:
+#    - Database memory: 1GB (as specified)
+#    - Actual RAM usage: ~1.2GB (includes overhead)
+#    - With replication: ~2.4GB total (master + replica)
+#
+#==============================================================================

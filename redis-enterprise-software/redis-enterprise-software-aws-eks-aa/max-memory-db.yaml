@@ -1,0 +1,24 @@
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseDatabase
+metadata:
+  name: max-db
+  namespace: redis-enterprise
+spec:
+  redisEnterpriseCluster:
+    name: redis-ent-eks
+  # Total memory: 35GB (3.5GB RAM + 31.5GB Flash)
+  memorySize: 35GB
+
+  # Redis Flex (Auto Tiering) configuration
+  # Requires cluster-level Redis Flex to be enabled
+  isRof: true
+  rofRamSize: 3.5GB  # RAM size (10% of total memorySize, minimum for Redis Flex)
+
+  # Database configuration
+  shardCount: 250
+  databasePort: 12001
+  replication: true
+  persistence: aofEverySecond
+  databaseSecretName: max-db-password
+  tlsMode: disabled
+  evictionPolicy: noeviction

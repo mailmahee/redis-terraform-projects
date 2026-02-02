@@ -1,0 +1,219 @@
+#==============================================================================
+# REDIS ENTERPRISE DATABASE - REDIS FLEX MODE (AUTO TIERING)
+#==============================================================================
+# This example creates a Redis database with Redis Flex enabled
+# for automatic tiering between RAM (hot data) and NVMe flash (warm/cold data)
+#
+# REQUIREMENTS:
+# - Redis Enterprise Cluster with redisOnFlashSpec enabled (STATE=Running)
+# - Cluster must have sufficient available RAM and flash storage
+# - RAM portion must be ≥10% of total memory (Redis requirement)
+#
+# USAGE:
+#   kubectl apply -f redis-enterprise-database.yaml
+#
+# VERIFY:
+#   kubectl get redb -n redis-enterprise
+#   kubectl get svc -n redis-enterprise
+#==============================================================================
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseDatabase
+metadata:
+  name: demo
+  namespace: redis-enterprise
+spec:
+  #============================================================================
+  # CLUSTER REFERENCE
+  #============================================================================
+  # Must match the RedisEnterpriseCluster name
+  redisEnterpriseCluster:
+    name: redis-ent-eks
+
+  #============================================================================
+  # REDIS FLEX CONFIGURATION
+  #============================================================================
+  # Enable Redis on Flash (Auto Tiering)
+  isRof: true
+
+  # Total database memory (RAM + Flash combined)
+  memorySize: 120GB
+
+  # RAM portion (must be ≥10% of memorySize)
+  # RAM stores hot data and indexes
+  # Calculation: 120GB × 10% = 12GB minimum
+  rofRamSize: 12GB
+
+  # Resulting flash storage: 120GB - 12GB = 108GB
+  # Flash stores warm/cold data automatically
+
+  #============================================================================
+  # DATABASE PORT
+  #============================================================================
+  # Port range: 10000-19999
+  databasePort: 12000
+
+  #============================================================================
+  # HIGH AVAILABILITY
+  #============================================================================
+  # Enable replication for HA (recommended for production)
+  replication: true  # Creates replica shards for failover
+
+  #============================================================================
+  # PERSISTENCE
+  #============================================================================
+  # Snapshot-based persistence (AOF also available)
+  persistence: snapshotEvery1Hour
+  # Options:
+  #   - disabled
+  #   - snapshotEvery1Hour
+  #   - snapshotEvery6Hour
+  #   - snapshotEvery12Hour
+  #   - aofEverySecond
+  #   - aofEvery1Second
+
+  #============================================================================
+  # DATABASE PASSWORD
+  #============================================================================
+  # Recommended: Use Kubernetes secret for production
+  # Create secret:
+  #   kubectl create secret generic demo-password \
+  #     --from-literal=password=YourDatabasePassword \
+  #     -n redis-enterprise
+  #
+  # Then uncomment:
+  # databaseSecretName: demo-password
+
+  # Or set password directly (not recommended for production):
+  # redisPassword: "YourDatabasePassword"
+
+  #============================================================================
+  # EVICTION POLICY
+  #============================================================================
+  # What happens when memory limit is reached
+  evictionPolicy: volatile-lru
+  # Options:
+  #   - volatile-lru: Remove least recently used keys with TTL (recommended for Flex)
+  #   - allkeys-lru: Remove least recently used keys
+  #   - volatile-ttl: Remove keys with shortest TTL
+  #   - volatile-random: Remove random keys with TTL
+  #   - allkeys-random: Remove random keys
+  #   - noeviction: Return errors when memory full
+
+  #============================================================================
+  # SHARDING
+  #============================================================================
+  # Number of database shards (1 = single shard)
+  # Increase for larger datasets or higher throughput
+  shardCount: 2
+
+  #============================================================================
+  # TLS/SSL (Optional)
+  #============================================================================
+  # Uncomment to enable TLS encryption
+  # tlsMode: enabled
+  # clientAuthenticationCertificates: my-cert-secret
+
+  #============================================================================
+  # REDIS VERSION (Optional)
+  #============================================================================
+  # Specify Redis OSS version (leave empty for cluster default)
+  # redisVersion: "7.2"
+
+  #============================================================================
+  # REDIS MODULES (Optional)
+  #============================================================================
+  # Note: Some modules may not be fully compatible with Redis Flex
+  # Test thoroughly before production use
+  # modulesList:
+  #   - name: RedisJSON
+  #     version: 2.6.6
+  #   - name: RedisSearch
+  #     version: 2.8.4
+
+  #============================================================================
+  # BACKUP (Optional)
+  #============================================================================
+  # Uncomment to enable automated backups
+  # backup:
+  #   interval: 24  # Hours between backups
+  #   s3:
+  #     awsSecretName: my-s3-credentials
+  #     bucketName: my-backup-bucket
+  #     subdir: redis-backups
+
+  #============================================================================
+  # RACK AWARENESS (Optional)
+  #============================================================================
+  # Ensure replicas are in different availability zones
+  # rackAware: true
+
+#==============================================================================
+# REDIS FLEX MEMORY SIZING GUIDE
+#==============================================================================
+#
+# IMPORTANT: RAM must be ≥10% of total memory
+#
+# Example configurations:
+#
+# Configuration 1: 120GB total (current example)
+# - memorySize: 120GB
+# - rofRamSize: 12GB (10%)
+# - Flash: 108GB
+#
+# Configuration 2: 500GB total
+# - memorySize: 500GB
+# - rofRamSize: 50GB (10%)
+# - Flash: 450GB
+#
+# Configuration 3: 1TB total
+# - memorySize: 1000GB
+# - rofRamSize: 100GB (10%)
+# - Flash: 900GB
+#
+# Configuration 4: Small database
+# - memorySize: 10GB
+# - rofRamSize: 1GB (10%)
+# - Flash: 9GB
+#
+# Best practices:
+# - Use 10-20% RAM for most workloads
+# - More RAM = better performance for hot data
+# - Less RAM = more cost savings
+# - Monitor hit rates and adjust as needed
+#
+#==============================================================================
+# NOTES
+#==============================================================================
+#
+# 1. After deployment, check database status:
+#    kubectl get redb demo -n redis-enterprise
+#
+# 2. Wait for STATUS=active (takes 1-2 minutes)
+#
+# 3. Verify Redis Flex is enabled:
+#    kubectl get redb demo -n redis-enterprise -o yaml | grep -E "isRof|rofRamSize|memorySize"
+#
+# 4. Get database endpoint:
+#    kubectl get svc demo -n redis-enterprise
+#    # Service name: demo.redis-enterprise.svc.cluster.local:12000
+#
+# 5. Access via port-forward (for testing):
+#    kubectl port-forward -n redis-enterprise svc/demo 12000:12000
+#    redis-cli -h localhost -p 12000 -a YourPassword
+#
+# 6. Or access from within the cluster:
+#    redis-cli -h demo.redis-enterprise.svc.cluster.local -p 12000 -a YourPassword
+#
+# 7. Memory calculation for Redis Flex:
+#    - Database total: 120GB (12GB RAM + 108GB Flash)
+#    - Actual RAM usage: ~14.4GB (includes overhead)
+#    - Actual flash usage: ~130GB (includes overhead)
+#    - With replication: ~2x total (master + replica)
+#
+# 8. Performance considerations:
+#    - Hot data automatically cached in RAM
+#    - Warm/cold data on flash (slightly higher latency)
+#    - 70-80% cost savings vs RAM-only
+#    - Transparent to applications (same Redis API)
+#
+#==============================================================================

@@ -1,0 +1,125 @@
+#==============================================================================
+# REDIS ENTERPRISE CLUSTER - RAM-ONLY MODE
+#==============================================================================
+# This example deploys a Redis Enterprise cluster using RAM-only storage
+# (no Redis Flex / Auto Tiering)
+#
+# REQUIREMENTS:
+# - Kubernetes 1.23+
+# - Redis Enterprise Operator installed
+# - StorageClass for persistent storage (e.g., gp3)
+#
+# USAGE:
+#   kubectl apply -f redis-enterprise-cluster.yaml
+#
+# VERIFY:
+#   kubectl get rec -n redis-enterprise
+#   kubectl get pods -n redis-enterprise
+#==============================================================================
+apiVersion: app.redislabs.com/v1
+kind: RedisEnterpriseCluster
+metadata:
+  name: redis-ent-eks
+  namespace: redis-enterprise
+spec:
+  #============================================================================
+  # CLUSTER CONFIGURATION
+  #============================================================================
+  nodes: 3  # Minimum 3 for high availability
+
+  #============================================================================
+  # REDIS ENTERPRISE IMAGE
+  #============================================================================
+  # Match with your operator version
+  # See: https://hub.docker.com/r/redislabs/redis/tags
+  redisEnterpriseImageSpec:
+    imagePullPolicy: IfNotPresent
+    repository: redislabs/redis
+    versionTag: 8.0.2-41  # Must match operator version
+
+  #============================================================================
+  # RESOURCE LIMITS
+  #============================================================================
+  # Adjust based on your node instance type
+  # Example: t3.xlarge has 16GB RAM, can use up to ~12-14Gi per Redis Enterprise node
+  redisEnterpriseNodeResources:
+    limits:
+      cpu: "4000m"      # 4 CPU cores
+      memory: 14Gi      # 14GB RAM per node
+    requests:
+      cpu: "2000m"      # 2 CPU cores minimum
+      memory: 14Gi      # 14GB RAM per node
+
+  #============================================================================
+  # PERSISTENT STORAGE
+  #============================================================================
+  # Using EBS GP3 storage class for persistent data
+  persistentSpec:
+    enabled: true
+    storageClassName: "gp3"  # AWS EBS GP3 storage
+    volumeSize: 50Gi         # 50GB per node
+
+  #============================================================================
+  # SERVICES CONFIGURATION
+  #============================================================================
+  # ClusterIP = internal access only (default, recommended)
+  # LoadBalancer = external access via AWS ELB (optional)
+  servicesRiggerSpec:
+    databaseServiceType: ClusterIP  # Database services
+    serviceNaming: bdb_name         # Use database name for service
+
+  uiServiceType: ClusterIP          # UI service (access via port-forward)
+
+  #============================================================================
+  # CLUSTER CREDENTIALS
+  #============================================================================
+  # Credentials stored in Kubernetes secret
+  # Create secret first:
+  #   kubectl create secret generic redis-cluster-credentials \
+  #     --from-literal=username=admin@admin.com \
+  #     --from-literal=password=YourPassword123 \
+  #     -n redis-enterprise
+  username: admin@admin.com
+
+  #============================================================================
+  # REDIS SOFTWARE CONFIGURATION
+  #============================================================================
+  redisEnterpriseServicesConfiguration:
+    # Disable interactive login (security best practice)
+    cmServer:
+      extraEnvVars:
+        - name: CM_DISABLE_INTERACTIVE_LOGIN
+          value: "true"
+
+  #============================================================================
+  # CLUSTER SETTINGS
+  #============================================================================
+  clusterRecovery: false  # Enable only for disaster recovery scenarios
+
+  #============================================================================
+  # RACK AWARENESS (Optional)
+  #============================================================================
+  # Uncomment to enable rack-zone awareness for multi-AZ deployments
+  # rackAwarenessNodeLabel: topology.kubernetes.io/zone
+
+#==============================================================================
+# NOTES
+#==============================================================================
+#
+# 1. After deployment, check cluster status:
+#    kubectl get rec redis-ent-eks -n redis-enterprise
+#
+# 2. Wait for STATE=Running (takes 5-10 minutes)
+#
+# 3. Access Redis Enterprise UI via port-forward:
+#    kubectl port-forward -n redis-enterprise svc/redis-ent-eks-ui 8443:8443
+#    # Then open: https://localhost:8443
+#
+# 4. Login credentials are from the secret you created
+#
+# 5. Total usable RAM for databases:
+#    - 3 nodes × 14Gi = 42GB total cluster memory
+#    - Account for ~10-20% overhead for Redis Enterprise
+#    - Usable for databases: ~35GB
+#
+#==============================================================================

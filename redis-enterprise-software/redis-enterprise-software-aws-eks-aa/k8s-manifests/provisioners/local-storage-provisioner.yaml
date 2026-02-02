@@ -1,0 +1,205 @@
+#==============================================================================
+# LOCAL STORAGE PROVISIONER FOR REDIS FLEX
+#==============================================================================
+# This provisioner discovers and provisions local NVMe SSD devices on i3/i4i instances
+# for Redis Flex (Auto Tiering) flash storage.
+#
+# IMPORTANT: This must be deployed BEFORE creating Redis Enterprise cluster with Flex enabled
+#
+# Deploy with:
+#   kubectl apply -f k8s-manifests/local-storage-provisioner.yaml
+#
+# Verify with:
+#   kubectl get pods -n kube-system -l app=local-volume-provisioner
+#   kubectl get pv | grep local-scsi
+#==============================================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: local-storage
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: local-storage-admin
+  namespace: local-storage
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: local-storage-provisioner
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "persistentvolumeclaims", "configmaps", "pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: local-storage-provisioner-bind
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: local-storage-provisioner
+subjects:
+- kind: ServiceAccount
+  name: local-storage-admin
+  namespace: local-storage
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-provisioner-config
+  namespace: local-storage
+data:
+  storageClassMap: |
+    local-scsi:
+      hostDir: /mnt/disks
+      mountDir: /mnt/disks
+      blockCleanerCommand:
+        - "/scripts/shred.sh"
+        - "2"
+      volumeMode: Filesystem
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: local-volume-provisioner
+  namespace: local-storage
+  labels:
+    app: local-volume-provisioner
+spec:
+  selector:
+    matchLabels:
+      app: local-volume-provisioner
+  template:
+    metadata:
+      labels:
+        app: local-volume-provisioner
+    spec:
+      serviceAccountName: local-storage-admin
+      nodeSelector:
+        # Only run on nodes with local NVMe SSDs (i3/i4i instances)
+        # This selector targets nodes based on instance type
+        kubernetes.io/arch: amd64
+      initContainers:
+      # Init container to discover and mount NVMe devices
+      - name: discover-nvme
+        image: public.ecr.aws/docker/library/ubuntu:22.04
+        command:
+        - sh
+        - -c
+        - |
+          #!/bin/sh
+          set -e
+
+          echo "Discovering NVMe devices..."
+          mkdir -p /mnt/disks
+
+          # Find NVMe devices (all nvme*n1 devices)
+          # Skip devices that are already mounted as root or system partitions
+          for device in /dev/nvme*n1; do
+            if [ -b "$device" ]; then
+              # Skip device if it's mounted as root or has partitions (system disk)
+              if mount | grep -q "^$device" || [ -b "$${device}p1" ]; then
+                echo "Skipping system device: $device"
+                continue
+              fi
+
+              echo "Found NVMe instance store device: $device"
+
+              # Extract device name (e.g., nvme0n1)
+              device_name=$(basename $device)
+              mount_point="/mnt/disks/$device_name"
+
+              # Check if device is already mounted
+              if mount | grep -q "$mount_point"; then
+                echo "Device $device already mounted at $mount_point"
+                continue
+              fi
+
+              # Check if device has a filesystem
+              if ! blkid $device > /dev/null 2>&1; then
+                echo "Creating ext4 filesystem on $device..."
+                mkfs.ext4 -F $device
+              fi
+
+              # Create mount point and mount
+              mkdir -p "$mount_point"
+              echo "Mounting $device to $mount_point..."
+              mount $device "$mount_point"
+
+              echo "Successfully mounted $device"
+            fi
+          done
+
+          echo "NVMe discovery complete"
+          ls -la /mnt/disks/
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: local-disks
+          mountPath: /mnt/disks
+          mountPropagation: Bidirectional
+        - name: device
+          mountPath: /dev
+      containers:
+      - name: provisioner
+        image: registry.k8s.io/sig-storage/local-volume-provisioner:v2.5.0
+        securityContext:
+          privileged: true
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: MY_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: JOB_CONTAINER_IMAGE
+          value: registry.k8s.io/sig-storage/local-volume-provisioner:v2.5.0
+        volumeMounts:
+        - name: local-disks
+          mountPath: /mnt/disks
+          mountPropagation: HostToContainer
+        - name: provisioner-config
+          mountPath: /etc/provisioner/config
+          readOnly: true
+      volumes:
+      - name: local-disks
+        hostPath:
+          path: /mnt/disks
+      - name: device
+        hostPath:
+          path: /dev
+      - name: provisioner-config
+        configMap:
+          name: local-provisioner-config
+
+---
+# StorageClass for local NVMe devices
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-scsi
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+# Retain PVs when PVC is deleted to prevent data loss
+reclaimPolicy: Retain

@@ -1,0 +1,166 @@
+#==============================================================================
+# REDIS ENTERPRISE CLUSTER - REDIS FLEX MODE (AUTO TIERING)
+#==============================================================================
+# This example deploys a Redis Enterprise cluster with Redis Flex enabled
+# for automatic tiering between RAM (hot data) and NVMe flash (warm/cold data)
+#
+# REQUIREMENTS:
+# - Kubernetes 1.23+
+# - Redis Enterprise Operator installed
+# - i3 or i4i instance types with local NVMe SSDs
+# - Local Storage Provisioner deployed (see provisioners/ folder)
+# - StorageClass 'local-scsi' available
+#
+# USAGE:
+#   # 1. Deploy local storage provisioner first:
+#   kubectl apply -f ../provisioners/local-storage-provisioner.yaml
+#
+#   # 2. Wait for provisioner pods to discover NVMe devices:
+#   kubectl get pods -n local-storage
+#
+#   # 3. Verify local-scsi PVs are created:
+#   kubectl get pv | grep local-scsi
+#
+#   # 4. Deploy cluster:
+#   kubectl apply -f redis-enterprise-cluster.yaml
+#
+# VERIFY:
+#   kubectl get rec -n redis-enterprise
+#   kubectl get pods -n redis-enterprise
+#==============================================================================
+apiVersion: app.redislabs.com/v1
+kind: RedisEnterpriseCluster
+metadata:
+  name: redis-ent-eks
+  namespace: redis-enterprise
+spec:
+  #============================================================================
+  # CLUSTER CONFIGURATION
+  #============================================================================
+  nodes: 3  # Minimum 3 for high availability
+
+  #============================================================================
+  # REDIS ENTERPRISE IMAGE
+  #============================================================================
+  # Match with your operator version
+  # See: https://hub.docker.com/r/redislabs/redis/tags
+  redisEnterpriseImageSpec:
+    imagePullPolicy: IfNotPresent
+    repository: redislabs/redis
+    versionTag: 8.0.2-41  # Must match operator version
+
+  #============================================================================
+  # RESOURCE LIMITS
+  #============================================================================
+  # Adjust based on your node instance type
+  # Example: i3.2xlarge has 61GB RAM, use 50Gi per Redis Enterprise node
+  redisEnterpriseNodeResources:
+    limits:
+      cpu: "8000m"      # 8 CPU cores
+      memory: 50Gi      # 50GB RAM per node
+    requests:
+      cpu: "4000m"      # 4 CPU cores minimum
+      memory: 50Gi      # 50GB RAM per node
+
+  #============================================================================
+  # PERSISTENT STORAGE (EBS for OS/system data)
+  #============================================================================
+  # Using EBS GP3 storage class for system persistent data
+  persistentSpec:
+    enabled: true
+    storageClassName: "gp3"  # AWS EBS GP3 storage
+    volumeSize: 50Gi         # 50GB per node
+
+  #============================================================================
+  # REDIS FLEX (AUTO TIERING) CONFIGURATION
+  #============================================================================
+  # Enable automatic tiering between RAM and NVMe flash storage
+  redisOnFlashSpec:
+    enabled: true                      # Enable Redis Flex
+
+    # Storage driver for flash storage
+    # Options: speedb (recommended), rocksdb
+    bigStoreDriver: speedb
+
+    # StorageClass for NVMe devices (created by local storage provisioner)
+    storageClassName: "local-scsi"
+
+    # Flash storage size per node
+    # i3.2xlarge has ~1.9TB NVMe, using 800G leaves buffer for overhead
+    flashDiskSize: 800G
+
+  #============================================================================
+  # SERVICES CONFIGURATION
+  #============================================================================
+  # ClusterIP = internal access only (default, recommended)
+  # LoadBalancer = external access via AWS ELB (optional)
+  servicesRiggerSpec:
+    databaseServiceType: ClusterIP  # Database services
+    serviceNaming: bdb_name         # Use database name for service
+
+  uiServiceType: ClusterIP          # UI service (access via port-forward)
+
+  #============================================================================
+  # CLUSTER CREDENTIALS
+  #============================================================================
+  # Credentials stored in Kubernetes secret
+  # Create secret first:
+  #   kubectl create secret generic redis-cluster-credentials \
+  #     --from-literal=username=admin@admin.com \
+  #     --from-literal=password=YourPassword123 \
+  #     -n redis-enterprise
+  username: admin@admin.com
+
+  #============================================================================
+  # REDIS SOFTWARE CONFIGURATION
+  #============================================================================
+  redisEnterpriseServicesConfiguration:
+    # Disable interactive login (security best practice)
+    cmServer:
+      extraEnvVars:
+        - name: CM_DISABLE_INTERACTIVE_LOGIN
+          value: "true"
+
+  #============================================================================
+  # CLUSTER SETTINGS
+  #============================================================================
+  clusterRecovery: false  # Enable only for disaster recovery scenarios
+
+  #============================================================================
+  # RACK AWARENESS (Optional)
+  #============================================================================
+  # Uncomment to enable rack-zone awareness for multi-AZ deployments
+  # rackAwarenessNodeLabel: topology.kubernetes.io/zone
+
+#==============================================================================
+# NOTES
+#==============================================================================
+#
+# 1. After deployment, check cluster status:
+#    kubectl get rec redis-ent-eks -n redis-enterprise
+#
+# 2. Wait for STATE=Running (takes 5-10 minutes)
+#
+# 3. Verify Redis Flex is enabled:
+#    kubectl get rec redis-ent-eks -n redis-enterprise -o yaml | grep -A 5 redisOnFlashSpec
+#
+# 4. Check flash storage PVCs are bound:
+#    kubectl get pvc -n redis-enterprise | grep flash
+#
+# 5. Access Redis Enterprise UI via port-forward:
+#    kubectl port-forward -n redis-enterprise svc/redis-ent-eks-ui 8443:8443
+#    # Then open: https://localhost:8443
+#
+# 6. Login credentials are from the secret you created
+#
+# 7. Total available storage for databases (example with i3.2xlarge):
+#    - RAM: 3 nodes × 50Gi = 150GB total cluster RAM
+#    - Flash: 3 nodes × 800G = 2400GB total cluster flash
+#    - Account for ~10-20% overhead
+#    - Usable: ~130GB RAM + ~2TB flash
+#
+# 8. Cost savings:
+#    - Redis Flex typically provides 70-80% cost savings vs RAM-only
+#    - Automatically tiers hot data to RAM, warm/cold data to flash
+#
+#==============================================================================
