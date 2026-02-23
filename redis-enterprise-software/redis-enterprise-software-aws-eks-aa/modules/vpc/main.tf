@@ -143,16 +143,17 @@ resource "aws_route_table_association" "public" {
 #==============================================================================
 # PRIVATE ROUTE TABLES
 #==============================================================================
+# Always create one route table per AZ for consistency and VPC peering support
 
 resource "aws_route_table" "private" {
-  count = var.enable_nat_gateway ? length(var.availability_zones) : 1
+  count = length(var.availability_zones)
 
   vpc_id = aws_vpc.main.id
 
   tags = merge(
     var.tags,
     {
-      Name = var.enable_nat_gateway ? "${var.name_prefix}-private-rt-${var.availability_zones[count.index]}" : "${var.name_prefix}-private-rt"
+      Name = "${var.name_prefix}-private-rt-${var.availability_zones[count.index]}"
     }
   )
 }
@@ -169,5 +170,5 @@ resource "aws_route_table_association" "private" {
   count = length(var.availability_zones)
 
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = var.enable_nat_gateway ? aws_route_table.private[count.index].id : aws_route_table.private[0].id
+  route_table_id = aws_route_table.private[count.index].id
 }

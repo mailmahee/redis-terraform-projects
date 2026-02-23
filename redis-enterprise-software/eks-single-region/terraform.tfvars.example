@@ -1,0 +1,443 @@
+#==============================================================================
+# REDIS ENTERPRISE SOFTWARE ON AWS EKS - CONFIGURATION
+# Copy this file to terraform.tfvars and update these values before deployment
+#==============================================================================
+#
+# 🚀 QUICK START - Choose ONE deployment mode:
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 1: RAM-ONLY (Default - Active by default)                        │
+# │ ✓ No changes needed - ready to deploy!                                  │
+# │ ✓ Uses t3.xlarge instances with EBS GP3 storage                         │
+# │ ✓ Simple, lower cost for smaller datasets                               │
+# │ ✓ Just run: terraform init && terraform apply                           │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 2: REDIS FLEX (Automatic RAM + Flash Tiering)                    │
+# │ ✓ Comment out Option 1, uncomment Option 2 in TWO sections below:       │
+# │   • Section: "EKS NODE GROUP CONFIGURATION" (~line 71-83)                │
+# │   • Section: "REDIS FLEX CONFIGURATION" (~line 153-172)                  │
+# │ ✓ Automatic tiering between 12GB RAM + 108GB NVMe flash                 │
+# │ ✓ 70-80% cost savings vs RAM-only for large datasets                    │
+# │ ✓ Everything automated (NVMe discovery, storage provisioning)           │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+#==============================================================================
+
+#==============================================================================
+# ⚠️  REQUIRED VALUES - MUST BE CHANGED BEFORE DEPLOYMENT
+#==============================================================================
+
+# Project identification (REQUIRED)
+user_prefix  = "your-name"      # Your unique identifier (e.g., "jsmith")
+cluster_name = "redis-ent-eks"  # Redis Enterprise cluster name
+owner        = "your-name"      # Your name/team for resource tagging
+
+# AWS Configuration (REQUIRED)
+aws_region = "us-west-2" # Your preferred AWS region
+
+# Redis Enterprise Cluster Credentials (REQUIRED)
+# IMPORTANT: Use alphanumeric passwords only (letters and numbers, no special characters)
+redis_cluster_username = "admin@admin.com" # Admin email for Redis Enterprise
+redis_cluster_password = "YourSecurePassword123" # Alphanumeric only
+
+#==============================================================================
+# EKS CLUSTER CONFIGURATION (Optional - Good defaults provided)
+#==============================================================================
+
+# Kubernetes Version
+kubernetes_version = "1.28" # Supported: 1.23 - 1.33
+
+# Cluster Endpoint Access
+cluster_endpoint_public_access  = true  # Allow public access to cluster API
+cluster_endpoint_private_access = true  # Allow private access from VPC
+
+# Environment
+environment = "dev" # dev, staging, or prod
+
+#==============================================================================
+# EKS NODE GROUP CONFIGURATION
+#==============================================================================
+# Choose ONE option below: Comment one, uncomment the other
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 1: RAM-ONLY (Default) - Standard EBS storage                     │
+# │ ✓ Active by default                                                     │
+# │ ✓ Uses t3.xlarge with EBS GP3 storage only                              │
+# │ ✓ Simpler, lower cost for smaller datasets                              │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+node_instance_types = ["t3.xlarge"] # RAM-only: Standard instance
+node_disk_size      = 100           # EBS disk size in GB
+
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 2: REDIS FLEX - Automatic RAM + Flash tiering                    │
+# │ ✓ Uncomment these 2 lines (and comment out Option 1 above)              │
+# │ ✓ Uses i3.2xlarge with 61GB RAM + 1.9TB NVMe flash storage              │
+# │ ✓ 70-80% cost savings vs RAM-only for large datasets                    │
+# │ ✓ Everything automated (no manual kubectl commands needed)              │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+# node_instance_types = ["i3.2xlarge"]  # REDIS FLEX: i3/i4i required
+# node_disk_size      = 100              # EBS for OS only (NVMe for flash)
+
+# Node Group Scaling
+node_desired_size = 3 # Desired number of worker nodes
+node_min_size     = 3 # Minimum number (must be >= 3 for Redis Enterprise HA)
+node_max_size     = 6 # Maximum number for auto-scaling
+
+#==============================================================================
+# NETWORK CONFIGURATION (Optional - Good defaults provided)
+#==============================================================================
+
+# Availability Zones (leave empty for automatic selection)
+availability_zones = [] # Auto-selects 3 AZs in your region
+# availability_zones = ["us-west-2a", "us-west-2b", "us-west-2c"] # Or specify manually
+
+# VPC and Subnets (will be created for you)
+vpc_cidr             = "10.0.0.0/16"
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
+
+#==============================================================================
+# REDIS ENTERPRISE CONFIGURATION (Optional - Good defaults provided)
+#==============================================================================
+
+# Kubernetes Namespace
+redis_enterprise_namespace = "redis-enterprise"
+
+# Operator Version (bundle version)
+# Visit: https://github.com/RedisLabs/redis-enterprise-k8s-docs/releases
+redis_operator_version = "v8.0.2-2" # Latest version (Stable: v7.4.6-2)
+
+# Cluster Configuration
+redis_cluster_nodes = 3 # Number of Redis Enterprise nodes (minimum 3 for HA)
+
+# Resource Allocation per Redis Enterprise Node
+redis_cluster_memory = "12Gi" # Memory limit per node (t3.xlarge has 16GB RAM)
+
+# Redis Enterprise Image Version (must match operator version)
+# Check latest builds at: https://hub.docker.com/r/redislabs/redis/tags?name=8.0.2
+redis_enterprise_version_tag = "8.0.2-41" # Latest build (Stable: 7.4.6-22)
+
+# Storage Configuration
+redis_cluster_storage_size  = "50Gi" # Persistent storage per node
+redis_cluster_storage_class = "gp3"  # EBS GP3 storage class
+
+# Service Type Configuration (default: internal access only)
+redis_ui_service_type       = "ClusterIP"   # ClusterIP (internal) or LoadBalancer (external)
+redis_database_service_type = "ClusterIP"   # Default service type for databases
+
+# License (optional)
+# redis_license_secret_name = "redis-enterprise-license" # Kubernetes secret name with license
+
+#==============================================================================
+# REDIS FLEX (AUTO TIERING) CONFIGURATION
+#==============================================================================
+# ✨ FULLY AUTOMATED - Match this with your instance type choice above!
+#
+# Redis Flex: Automatic tiering between RAM (hot data) and flash (warm/cold data)
+# • 70-80% cost savings vs RAM-only for large datasets
+# • Automatic data tiering based on access patterns
+# • Hot data in RAM, warm/cold data on NVMe SSDs
+#
+# Documentation: https://redis.io/docs/latest/operate/kubernetes/re-clusters/redis-flex/
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 1: RAM-ONLY MODE (Default)                                       │
+# │ ✓ Active by default                                                     │
+# │ ✓ Matches t3.xlarge instance type above                                 │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+enable_redis_flex           = false  # RAM-only mode
+sample_db_enable_redis_flex = false  # Sample DB uses RAM only
+sample_db_memory            = "100MB" # RAM-only: 100MB total
+
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 2: REDIS FLEX MODE (Uncomment ALL lines below)                   │
+# │ ✓ Uncomment these settings AND i3.2xlarge instance type above           │
+# │ ✓ Everything else is automated (NVMe discovery, storage, etc.)          │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+# ⚙️  Cluster-level Redis Flex configuration
+# enable_redis_flex              = true         # ENABLE Redis Flex
+# redis_flex_storage_class       = "local-scsi" # NVMe storage class (auto-created)
+# redis_flex_flash_disk_size     = "800G"       # Flash per node (~1.7TB max for i3.2xlarge)
+# redis_flex_storage_driver      = "speedb"     # speedb (recommended) or rocksdb
+
+# 💾 Sample database Redis Flex configuration
+# sample_db_enable_redis_flex    = true         # Enable Flex for sample DB
+# sample_db_rof_ram_size         = "12GB"       # RAM size (must be ≥10% of total memory)
+# sample_db_memory               = "120GB"      # Total: 12GB RAM + 108GB Flash
+
+#==============================================================================
+# EXTERNAL ACCESS VIA INGRESS (Optional - Disabled by default)
+#==============================================================================
+
+# Enable ingress for external access to cluster and databases
+redis_enable_ingress = false
+
+# If redis_enable_ingress = true, configure these:
+# redis_api_fqdn_url    = "api-redis.example.com"        # FQDN for Redis Enterprise API
+# redis_db_fqdn_suffix  = "-db-redis.example.com"        # FQDN suffix for databases
+# redis_ingress_method  = "ingress"                      # "ingress" or "openShiftRoute"
+# redis_ingress_annotations = {
+#   "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"
+# }
+
+#==============================================================================
+# SAMPLE DATABASE CONFIGURATION (Optional - Good defaults provided)
+#==============================================================================
+
+# Automatic Database Creation
+create_sample_database = true     # Create a demo database for testing
+sample_db_name         = "demo"   # Database name
+sample_db_port         = 12000    # Database port (10000-19999)
+# sample_db_memory is set above in Redis Flex config section (100MB or 120GB)
+sample_db_replication  = true       # Enable HA replication (default: enabled)
+sample_db_password     = "admin"    # Database password (alphanumeric only)
+sample_db_tls_mode     = "disabled" # TLS mode: disabled, enabled, replica_ssl (REQUIRED: enabled for NGINX Ingress TLS mode)
+
+#==============================================================================
+# REDIS TEST CLIENT (Optional - For testing connectivity & performance)
+#==============================================================================
+
+# Deploy test client pod with redis-cli, redis-benchmark, and memtier_benchmark
+create_test_client = false # Set to true to deploy test client pod
+
+# Test client resource sizing (t3.micro equivalent: 1 vCPU, 1GB RAM)
+# test_client_cpu_request    = "500m"  # CPU request (default)
+# test_client_cpu_limit      = "1000m" # CPU limit (default)
+# test_client_memory_request = "512Mi" # Memory request (default)
+# test_client_memory_limit   = "1Gi"   # Memory limit (default)
+
+#==============================================================================
+# EXTERNAL ACCESS CONFIGURATION
+#==============================================================================
+# Redis databases can have THREE access patterns:
+#
+# 1. INTERNAL ONLY (default):
+#    - external_access_type = "none"
+#    - Creates: "demo" service (ClusterIP) - accessible only within K8s cluster
+#
+# 2. EXTERNAL ONLY:
+#    - external_access_type = "nlb" or "nginx-ingress"
+#    - expose_redis_databases = true
+#    - Creates: "demo-external" service (LoadBalancer/Ingress) - accessible from internet
+#    - Original "demo" service (ClusterIP) still exists for internal access
+#
+# 3. BOTH INTERNAL AND EXTERNAL (recommended):
+#    - external_access_type = "nlb" or "nginx-ingress"
+#    - expose_redis_databases = true
+#    - Creates: BOTH "demo" (ClusterIP) AND "demo-external" (LoadBalancer/Ingress)
+#    - Internal apps use: demo.redis-enterprise.svc.cluster.local:12000
+#    - External apps use: NLB DNS or redis domain (see below)
+#==============================================================================
+
+# Choose external access method:
+# - "nlb": AWS Network Load Balancer (~$16/month per service, production-ready)
+# - "nginx-ingress": NGINX Ingress Controller (~$16/month total, cost-effective at scale)
+# - "none": Internal access only (ClusterIP services, default)
+external_access_type = "none"  # Change to "nlb" or "nginx-ingress" to enable external access
+
+# What to expose externally (only applies when external_access_type != "none")
+expose_redis_ui        = false  # Set to true to expose Redis Enterprise UI
+expose_redis_databases = false  # Set to true to expose Redis databases (creates -external services)
+
+# NGINX Ingress settings (when external_access_type = "nginx-ingress")
+# ingress_domain       = "redis.example.com"  # Your domain for ingress (REQUIRED for NGINX mode)
+# nginx_instance_count = 2                    # Number of NGINX replicas for HA
+# enable_tls           = false                # false = testing (no TLS), true = production (requires TLS on databases)
+
+#==============================================================================
+# DATABASE SERVICE CONFIGURATION
+#==============================================================================
+# NOTE: When using external_access module (nlb or nginx-ingress), this setting is IGNORED
+#       The external_access module creates separate "-external" services while keeping
+#       the original ClusterIP service for internal access (both exist simultaneously)
+#
+# Only set this to "LoadBalancer" if NOT using the external_access module
+sample_db_service_type = "ClusterIP" # ClusterIP (internal) - recommended
+# sample_db_service_port = 0         # Custom service port (0 = use database_port)
+
+#==============================================================================
+# EXAMPLE CONFIGURATIONS FOR DATABASE ACCESS
+#==============================================================================
+#
+# EXAMPLE 1: Internal access only (default, free)
+# external_access_type = "none"
+# Result: Database accessible at demo.redis-enterprise.svc.cluster.local:12000 (inside cluster only)
+#
+# EXAMPLE 2: Both internal AND external access via NLB
+# external_access_type = "nlb"
+# expose_redis_databases = true
+# Result:
+#   - Internal: demo.redis-enterprise.svc.cluster.local:12000
+#   - External: <nlb-dns-name>:12000 (get with: kubectl get svc demo-external -n redis-enterprise)
+#
+# EXAMPLE 3: Both internal AND external access via NGINX Ingress (non-TLS)
+# external_access_type = "nginx-ingress"
+# expose_redis_databases = true
+# ingress_domain = "redis.example.com"
+# enable_tls = false
+# Result:
+#   - Internal: demo.redis-enterprise.svc.cluster.local:12000
+#   - External: <nginx-nlb-dns>:12000 (get with: kubectl get svc ingress-nginx-controller -n ingress-nginx)
+#
+# EXAMPLE 4: Both internal AND external access via NGINX Ingress (TLS, production)
+# external_access_type = "nginx-ingress"
+# expose_redis_databases = true
+# ingress_domain = "redis.example.com"
+# enable_tls = true
+# sample_db_tls_mode = "enabled"  # REQUIRED for TLS mode
+# Result:
+#   - Internal: demo.redis-enterprise.svc.cluster.local:12000 (no TLS)
+#   - External: demo-redis.example.com:443 (with TLS, requires DNS CNAME setup)
+#
+#==============================================================================
+
+# Advanced Database Options
+sample_db_shard_count = 1          # Number of shards (1 = single shard, default)
+# sample_db_redis_version = "7.2"  # Redis OSS version (empty = cluster default)
+
+# Redis Modules (optional)
+# sample_db_modules = [
+#   {
+#     name    = "RedisJSON"
+#     version = "2.6.6"
+#   },
+#   {
+#     name    = "RedisSearch"
+#     version = "2.8.4"
+#   }
+# ]
+
+#==============================================================================
+# RESOURCE TAGGING (Optional - Customize as needed)
+#==============================================================================
+
+tags = {
+  environment = "demo"
+  purpose     = "redis-enterprise-eks-testing"
+  managed_by  = "terraform"
+}
+
+#==============================================================================
+# 🔗 HELPFUL INFORMATION
+#==============================================================================
+#
+# After deployment, access your cluster with:
+#
+# 1. Configure kubectl:
+#    aws eks update-kubeconfig --region us-west-2 --name your-name-redis-ent-eks
+#
+# 2. Verify cluster status:
+#    kubectl get rec -n redis-enterprise
+#    kubectl get redb -n redis-enterprise
+#    kubectl get svc -n redis-enterprise
+#
+# 3. Access Redis Enterprise UI:
+#    # If using ClusterIP (default):
+#    kubectl port-forward -n redis-enterprise svc/redis-ent-eks-ui 8443:8443
+#    # Then access: https://localhost:8443
+#
+#    # If using LoadBalancer:
+#    kubectl get svc redis-ent-eks-ui -n redis-enterprise
+#    # Access via external LoadBalancer IP
+#
+# 4. Access sample database:
+#    # If using ClusterIP (default):
+#    kubectl port-forward -n redis-enterprise svc/demo 12000:12000
+#    redis-cli -h localhost -p 12000 -a admin
+#
+#    # If using LoadBalancer:
+#    kubectl get svc demo -n redis-enterprise
+#    # Connect via external LoadBalancer IP
+#
+# 5. Or from inside the cluster:
+#    # Service FQDN: demo.redis-enterprise.svc.cluster.local:12000
+#
+# NOTE: Default is ClusterIP (internal access only). Set service types to
+# LoadBalancer for external access, or enable ingress for DNS-based routing.
+#
+#==============================================================================
+# 🚀 DEPLOYMENT STEPS
+#==============================================================================
+#
+# 1. Copy this file:
+#    cp terraform.tfvars.example terraform.tfvars
+#
+# 2. Edit terraform.tfvars with your values (especially credentials!)
+#
+# 3. Deploy:
+#    terraform init
+#    terraform plan
+#    terraform apply
+#
+# 4. Wait ~10-15 minutes for complete deployment
+#
+# 5. Configure kubectl and access your cluster!
+#
+#==============================================================================
+# 🔒 SECURITY REMINDERS
+#==============================================================================
+#
+# ✅ DO:
+# • Use strong, unique passwords (alphanumeric only for Redis Enterprise)
+# • Never commit terraform.tfvars to git (it's gitignored by default)
+# • Use AWS Systems Manager Parameter Store for secrets in production
+# • Enable EKS cluster logging for audit trails
+# • Review and restrict security group rules for production
+#
+# ⚠️  PRODUCTION:
+# • Consider private subnets for worker nodes
+# • Enable TLS for Redis databases
+# • Configure backup and disaster recovery
+# • Set up monitoring with Prometheus/Grafana
+# • Implement network policies
+# • Use IAM roles for service accounts (IRSA)
+#
+#==============================================================================
+# 📊 RESOURCE REQUIREMENTS
+#==============================================================================
+#
+# STANDARD (default configuration):
+# • 3 worker nodes (for Redis Enterprise HA)
+# • t3.xlarge instances (4 vCPU, 16GB RAM each)
+# • 100GB EBS storage per node
+# • Total: ~48GB RAM, 12 vCPUs, 300GB storage
+#
+# REDIS FLEX (when enabled):
+# • 3 worker nodes (for Redis Enterprise HA)
+# • i3.xlarge instances (4 vCPU, 30.5GB RAM, 950GB NVMe SSD each)
+# • 100GB EBS storage per node (for OS/system)
+# • Total: ~91.5GB RAM, 12 vCPUs, 2850GB NVMe flash storage
+#
+# For production:
+# • Standard: r6i.xlarge or larger (memory-optimized)
+# • Redis Flex: i3.2xlarge or i4i.2xlarge (more RAM + flash)
+# • Increase storage based on data size
+# • Add more nodes for higher capacity
+#
+#==============================================================================
+# 💰 ESTIMATED COSTS
+#==============================================================================
+#
+# STANDARD (t3.xlarge - default):
+# • EKS control plane: ~$73/month
+# • 3x t3.xlarge nodes: ~$300/month (~$0.156/hr each)
+# • EBS gp3 storage (300GB): ~$25/month
+# • Data transfer: Variable
+# • Total: ~$400-500/month for dev/test
+#
+# REDIS FLEX (i3.xlarge - when enabled):
+# • EKS control plane: ~$73/month
+# • 3x i3.xlarge nodes: ~$675/month (~$0.312/hr each)
+# • EBS gp3 storage (300GB): ~$25/month
+# • Data transfer: Variable
+# • Total: ~$775-825/month for dev/test
+#
+# Remember to run `terraform destroy` when done testing!
+#
+#==============================================================================

@@ -5,7 +5,7 @@
 variable "project" {
   description = "Project name for resource naming and tagging"
   type        = string
-  default     = "redis-enterprise-eks"
+  default     = "redis-enterprise-eks-aa"
 }
 
 variable "environment" {
@@ -25,47 +25,45 @@ variable "user_prefix" {
 }
 
 variable "cluster_name" {
-  description = "Redis Enterprise cluster name"
+  description = "Redis Enterprise cluster name (shared across all regions)"
   type        = string
   default     = "redis-ent-eks"
 }
 
 #==============================================================================
-# AWS CONFIGURATION
+# MULTI-REGION CONFIGURATION
 #==============================================================================
 
-variable "aws_region" {
-  description = "AWS region for deployment"
+variable "regions" {
+  description = "Map of region configurations for multi-region Active-Active deployment"
+  type = map(object({
+    vpc_cidr             = string
+    public_subnet_cidrs  = list(string)
+    private_subnet_cidrs = list(string)
+    availability_zones   = optional(list(string), [])
+    key_name             = optional(string, "")
+    ssh_key_path         = optional(string, "")
+  }))
+
+  validation {
+    condition     = length(var.regions) >= 1 && length(var.regions) <= 2
+    error_message = "Currently supporting 1-2 regions for Active-Active deployment."
+  }
+}
+
+#==============================================================================
+# DNS CONFIGURATION
+#==============================================================================
+
+variable "dns_hosted_zone_id" {
+  description = "Route53 hosted zone ID for DNS records (required for Active-Active)"
   type        = string
-  default     = "us-west-2"
 }
 
-variable "availability_zones" {
-  description = "List of availability zones to use. If empty, will auto-select based on region"
-  type        = list(string)
-  default     = []
-}
-
-#==============================================================================
-# NETWORK CONFIGURATION
-#==============================================================================
-
-variable "vpc_cidr" {
-  description = "CIDR block for VPC"
-  type        = string
-  default     = "10.0.0.0/16"
-}
-
-variable "public_subnet_cidrs" {
-  description = "CIDR blocks for public subnets (one per AZ)"
-  type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-}
-
-variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets (one per AZ)"
-  type        = list(string)
-  default     = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
+variable "create_dns_records" {
+  description = "Whether to create Route53 DNS records. Set to false to use NLB DNS names directly."
+  type        = bool
+  default     = true
 }
 
 #==============================================================================
@@ -101,7 +99,7 @@ variable "node_instance_types" {
 }
 
 variable "node_desired_size" {
-  description = "Desired number of worker nodes"
+  description = "Desired number of worker nodes per region"
   type        = number
   default     = 3
   validation {
@@ -111,7 +109,7 @@ variable "node_desired_size" {
 }
 
 variable "node_min_size" {
-  description = "Minimum number of worker nodes"
+  description = "Minimum number of worker nodes per region"
   type        = number
   default     = 3
   validation {
@@ -121,7 +119,7 @@ variable "node_min_size" {
 }
 
 variable "node_max_size" {
-  description = "Maximum number of worker nodes"
+  description = "Maximum number of worker nodes per region"
   type        = number
   default     = 6
 }
@@ -149,7 +147,7 @@ variable "redis_operator_version" {
 }
 
 variable "redis_cluster_nodes" {
-  description = "Number of Redis Enterprise cluster nodes"
+  description = "Number of Redis Enterprise cluster nodes per region"
   type        = number
   default     = 3
   validation {
@@ -169,13 +167,9 @@ variable "redis_cluster_username" {
 }
 
 variable "redis_cluster_password" {
-  description = "Redis Enterprise cluster admin password (alphanumeric only)"
+  description = "Redis Enterprise cluster admin password"
   type        = string
   sensitive   = true
-  validation {
-    condition     = can(regex("^[a-zA-Z0-9]+$", var.redis_cluster_password))
-    error_message = "Password must be alphanumeric (letters and numbers only)."
-  }
 }
 
 variable "redis_cluster_memory" {
@@ -204,46 +198,31 @@ variable "redis_enterprise_version_tag" {
 
 #==============================================================================
 # REDIS FLEX (AUTO TIERING) CONFIGURATION
+# Note: Redis Flex is INCOMPATIBLE with Active-Active
 #==============================================================================
 
 variable "enable_redis_flex" {
-  description = "Enable Redis Flex (Auto Tiering) for flash storage. Requires local NVMe SSDs on worker nodes."
+  description = "Enable Redis Flex (Auto Tiering). WARNING: Incompatible with Active-Active."
   type        = bool
   default     = false
 }
 
 variable "redis_flex_storage_class" {
-  description = "Storage class for Redis Flex flash storage (must be local NVMe SSDs, not EBS)"
+  description = "Storage class for Redis Flex flash storage"
   type        = string
   default     = "local-scsi"
 }
 
 variable "redis_flex_flash_disk_size" {
-  description = "Flash disk size per node for Redis Flex (e.g., '100G', '500G')"
+  description = "Flash disk size per node for Redis Flex"
   type        = string
   default     = "100G"
 }
 
 variable "redis_flex_storage_driver" {
-  description = "Storage driver for Redis Flex: 'speedb' (default) or 'rocksdb'"
+  description = "Storage driver for Redis Flex: 'speedb' or 'rocksdb'"
   type        = string
   default     = "speedb"
-  validation {
-    condition     = contains(["speedb", "rocksdb"], var.redis_flex_storage_driver)
-    error_message = "Storage driver must be either 'speedb' or 'rocksdb'."
-  }
-}
-
-variable "sample_db_enable_redis_flex" {
-  description = "Enable Redis Flex for sample database (requires enable_redis_flex=true at cluster level)"
-  type        = bool
-  default     = false
-}
-
-variable "sample_db_rof_ram_size" {
-  description = "RAM size for Redis Flex database (minimum 10% of sample_db_memory, e.g., '10GB')"
-  type        = string
-  default     = "10GB"
 }
 
 #==============================================================================
@@ -251,19 +230,19 @@ variable "sample_db_rof_ram_size" {
 #==============================================================================
 
 variable "redis_ui_service_type" {
-  description = "Service type for Redis Enterprise UI (ClusterIP for internal, LoadBalancer for external)"
+  description = "Service type for Redis Enterprise UI"
   type        = string
   default     = "ClusterIP"
 }
 
 variable "ui_internal_lb_enabled" {
-  description = "If true, exposes the UI via an internal AWS LoadBalancer (kept inside the VPC); otherwise uses ClusterIP."
+  description = "Expose UI via internal AWS LoadBalancer"
   type        = bool
   default     = false
 }
 
 variable "ui_service_annotations" {
-  description = "Annotations to apply to the UI service (used when enabling an internal LB)."
+  description = "Annotations for UI service"
   type        = map(string)
   default = {
     "service.beta.kubernetes.io/aws-load-balancer-internal" = "true"
@@ -271,38 +250,20 @@ variable "ui_service_annotations" {
 }
 
 variable "redis_database_service_type" {
-  description = "Default service type for databases (ClusterIP for internal, LoadBalancer for external)"
+  description = "Default service type for databases"
   type        = string
   default     = "ClusterIP"
 }
 
 variable "redis_license_secret_name" {
-  description = "Name of Kubernetes secret containing Redis Enterprise license (optional)"
+  description = "Name of Kubernetes secret containing Redis Enterprise license"
   type        = string
   default     = ""
 }
 
 #==============================================================================
-# REDIS INGRESS CONFIGURATION (for external access)
+# REDIS INGRESS CONFIGURATION (required for Active-Active)
 #==============================================================================
-
-variable "redis_enable_ingress" {
-  description = "Enable ingress/route configuration for external access"
-  type        = bool
-  default     = false
-}
-
-variable "redis_api_fqdn_url" {
-  description = "FQDN for Redis Enterprise API (required if redis_enable_ingress is true)"
-  type        = string
-  default     = ""
-}
-
-variable "redis_db_fqdn_suffix" {
-  description = "FQDN suffix for database access (required if redis_enable_ingress is true)"
-  type        = string
-  default     = ""
-}
 
 variable "redis_ingress_method" {
   description = "Ingress method: 'ingress' for NGINX/HAProxy or 'openShiftRoute'"
@@ -311,237 +272,71 @@ variable "redis_ingress_method" {
 }
 
 variable "redis_ingress_annotations" {
-  description = "Annotations for ingress controller"
+  description = "Annotations for ingress controller (per Redis docs)"
   type        = map(string)
   default = {
+    "kubernetes.io/ingress.class"                 = "nginx"
     "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"
   }
 }
 
 #==============================================================================
-# SAMPLE DATABASE CONFIGURATION
+# ACTIVE-ACTIVE DATABASE CONFIGURATION
 #==============================================================================
 
-variable "create_sample_database" {
-  description = "Create a sample Redis database for testing"
+variable "create_aa_database" {
+  description = "Create an Active-Active database across all regions"
   type        = bool
   default     = true
 }
 
-variable "sample_db_name" {
-  description = "Name for the sample Redis database"
+variable "aa_database_name" {
+  description = "Name for the Active-Active database"
   type        = string
-  default     = "demo"
+  default     = "my-aa-db"
 }
 
-variable "sample_db_memory" {
-  description = "Memory size for sample database (e.g., '100MB', '1GB')"
+variable "aa_database_memory" {
+  description = "Memory size for the Active-Active database (e.g., '500MB', '1GB')"
   type        = string
-  default     = "100MB"
+  default     = "500MB"
 }
 
-variable "sample_db_port" {
-  description = "Port for sample database (10000-19999)"
-  type        = number
-  default     = 12000
-  validation {
-    condition     = var.sample_db_port >= 10000 && var.sample_db_port <= 19999
-    error_message = "Database port must be between 10000 and 19999."
-  }
-}
-
-variable "sample_db_replication" {
-  description = "Enable replication for sample database (HA enabled by default)"
-  type        = bool
-  default     = true
-}
-
-variable "sample_db_service_type" {
-  description = "Service type for sample database (ClusterIP for internal, LoadBalancer for external)"
-  type        = string
-  default     = "ClusterIP"
-}
-
-variable "sample_db_service_port" {
-  description = "Custom service port for external access (0 to use database_port)"
-  type        = number
-  default     = 0
-}
-
-variable "sample_db_shard_count" {
-  description = "Number of shards for sample database (1 for single shard)"
+variable "aa_database_shard_count" {
+  description = "Number of shards for the Active-Active database"
   type        = number
   default     = 1
 }
 
-variable "sample_db_modules" {
-  description = "List of Redis modules to enable (e.g., [{name = 'RedisJSON', version = '2.6.6'}])"
-  type = list(object({
-    name    = string
-    version = string
-  }))
-  default = []
+variable "aa_database_replication" {
+  description = "Enable replication for the Active-Active database"
+  type        = bool
+  default     = true
 }
 
-variable "sample_db_redis_version" {
-  description = "Redis OSS version for sample database (empty for cluster default)"
-  type        = string
-  default     = ""
-}
-
-variable "sample_db_password" {
-  description = "Password for sample database (empty for no password)"
+variable "aa_database_password" {
+  description = "Password for the Active-Active database (optional)"
   type        = string
   sensitive   = true
   default     = ""
 }
 
-variable "sample_db_tls_mode" {
-  description = "TLS mode for sample database: 'disabled', 'enabled', or 'replica_ssl'. Required to be 'enabled' when using NGINX Ingress with enable_tls=true."
+variable "aa_database_tls_mode" {
+  description = "TLS mode for Active-Active database: 'disabled', 'enabled', or 'replica_ssl'"
   type        = string
   default     = "disabled"
   validation {
-    condition     = contains(["disabled", "enabled", "replica_ssl"], var.sample_db_tls_mode)
+    condition     = contains(["disabled", "enabled", "replica_ssl"], var.aa_database_tls_mode)
     error_message = "TLS mode must be one of: disabled, enabled, replica_ssl."
   }
 }
 
-#==============================================================================
-# REDIS TEST CLIENT CONFIGURATION
-#==============================================================================
-
-variable "create_test_client" {
-  description = "Create a test client pod with redis-cli, redis-benchmark, and memtier_benchmark"
-  type        = bool
-  default     = false
-}
-
-variable "test_client_name" {
-  description = "Name of the test client deployment"
-  type        = string
-  default     = "redis-test-client"
-}
-
-variable "test_client_cpu_request" {
-  description = "CPU request for test client (t3.micro = 500m)"
-  type        = string
-  default     = "500m"
-}
-
-variable "test_client_cpu_limit" {
-  description = "CPU limit for test client (t3.micro = 1000m = 1 vCPU)"
-  type        = string
-  default     = "1000m"
-}
-
-variable "test_client_memory_request" {
-  description = "Memory request for test client (t3.micro = 512Mi)"
-  type        = string
-  default     = "512Mi"
-}
-
-variable "test_client_memory_limit" {
-  description = "Memory limit for test client (t3.micro = 1Gi = 1GB RAM)"
-  type        = string
-  default     = "1Gi"
-}
-
-variable "test_client_create_scripts" {
-  description = "Create ConfigMap with helper test scripts"
-  type        = bool
-  default     = true
-}
-
-#==============================================================================
-# EXTERNAL ACCESS CONFIGURATION
-#==============================================================================
-
-variable "external_access_type" {
-  description = "Type of external access: 'nlb' (AWS Network Load Balancer), 'nginx-ingress' (NGINX Ingress Controller), or 'none' (internal only)"
-  type        = string
-  default     = "none"
-
-  validation {
-    condition     = contains(["nlb", "nginx-ingress", "none"], var.external_access_type)
-    error_message = "External access type must be 'nlb', 'nginx-ingress', or 'none'."
-  }
-}
-
-variable "expose_redis_ui" {
-  description = "Expose Redis Enterprise UI externally (requires external_access_type != 'none')"
-  type        = bool
-  default     = false
-}
-
-variable "expose_redis_databases" {
-  description = "Expose Redis databases externally (requires external_access_type != 'none')"
-  type        = bool
-  default     = false
-}
-
-# NGINX Ingress specific variables
-variable "ingress_domain" {
-  description = "Base domain for NGINX ingress when using nginx-ingress mode (e.g., redis.example.com)"
-  type        = string
-  default     = ""
-}
-
-variable "nginx_instance_count" {
-  description = "Number of NGINX ingress controller replicas (only used with nginx-ingress mode)"
-  type        = number
-  default     = 2
-}
-
-variable "enable_tls" {
-  description = "Enable TLS mode for NGINX Ingress (production). When true, requires TLS on Redis databases and uses SSL passthrough on port 443. When false (testing), uses direct port access without TLS."
-  type        = bool
-  default     = false
-}
-
-#==============================================================================
-# EC2 BASTION CONFIGURATION
-#==============================================================================
-
-variable "create_bastion" {
-  description = "Create EC2 bastion instance for Redis testing, troubleshooting, and admin tasks"
-  type        = bool
-  default     = false
-}
-
-variable "ec2_key_name" {
-  description = "SSH key pair name for EC2 bastion instance (must exist in AWS region)"
-  type        = string
-  default     = ""
-}
-
-variable "ssh_private_key_path" {
-  description = "Path to SSH private key file for bastion access"
-  type        = string
-  default     = ""
-}
-
-variable "bastion_instance_type" {
-  description = "EC2 instance type for bastion host"
-  type        = string
-  default     = "t3.small"
-}
-
-variable "bastion_associate_public_ip" {
-  description = "Associate public IP address with bastion instance"
-  type        = bool
-  default     = true
-}
-
-variable "bastion_ssh_cidr_blocks" {
-  description = "CIDR blocks allowed to SSH to bastion instance (0.0.0.0/0 = anywhere, restrict in production)"
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
-variable "bastion_install_docker" {
-  description = "Install Docker on bastion instance for container operations"
-  type        = bool
-  default     = false
+variable "aa_database_modules" {
+  description = "List of Redis modules to enable on the Active-Active database"
+  type = list(object({
+    name = string
+  }))
+  default = []
 }
 
 #==============================================================================

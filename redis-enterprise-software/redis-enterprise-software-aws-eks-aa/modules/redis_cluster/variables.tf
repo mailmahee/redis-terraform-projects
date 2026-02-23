@@ -177,6 +177,22 @@ variable "ingress_annotations" {
   description = "Annotations for ingress controller (e.g., for SSL passthrough)"
   type        = map(string)
   default = {
+    "kubernetes.io/ingress.class"                 = "nginx"
     "nginx.ingress.kubernetes.io/ssl-passthrough" = "true"
   }
+}
+
+#==============================================================================
+# ACTIVE-ACTIVE CONFIGURATION
+#==============================================================================
+
+variable "enable_active_active" {
+  description = "Enable Active-Active (multi-region) deployment. Requires ingress to be enabled and Redis Flex to be disabled."
+  type        = bool
+  default     = false
+}
+
+variable "operator_version" {
+  description = "Redis Enterprise operator version tag (e.g. v7.4.6-2), used to fetch the matching webhook.yaml for admission controller setup"
+  type        = string
 }

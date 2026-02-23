@@ -101,6 +101,32 @@ resource "aws_security_group_rule" "cluster_ingress_node_https" {
   description              = "Allow pods to communicate with the cluster API Server"
 }
 
+# Allow HTTPS (443) for NGINX Ingress Controller
+# Required for:
+# - NGINX ingress HTTPS traffic (port 443 → NGINX → Redis Enterprise API/DB)
+# - Redis Enterprise CRDB coordinator cross-cluster communication when ingressOrRouteSpec
+#   is configured (the coordinator uses port 443 via the ingress, not 9443 directly)
+resource "aws_security_group_rule" "node_https_ingress" {
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.node_group.id
+  description       = "Allow HTTPS for NGINX Ingress and Redis Enterprise cross-cluster API"
+}
+
+# Allow HTTP (80) for NGINX Ingress Controller
+resource "aws_security_group_rule" "node_http_ingress" {
+  type              = "ingress"
+  from_port         = 80
+  to_port           = 80
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.node_group.id
+  description       = "Allow HTTP for NGINX Ingress"
+}
+
 # Allow Redis Enterprise ports (8001-9443, 10000-19999)
 resource "aws_security_group_rule" "node_redis_enterprise_control" {
   type              = "ingress"
@@ -120,6 +146,19 @@ resource "aws_security_group_rule" "node_redis_enterprise_data" {
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.node_group.id
   description       = "Allow Redis Enterprise database ports"
+}
+
+# Allow cross-region traffic from peer VPCs for Active-Active
+resource "aws_security_group_rule" "node_peer_region_all" {
+  for_each = toset(var.peer_region_cidrs)
+
+  type              = "ingress"
+  from_port         = 0
+  to_port           = 65535
+  protocol          = "tcp"
+  cidr_blocks       = [each.value]
+  security_group_id = aws_security_group.node_group.id
+  description       = "Allow all TCP traffic from peer region ${each.value}"
 }
 
 #==============================================================================

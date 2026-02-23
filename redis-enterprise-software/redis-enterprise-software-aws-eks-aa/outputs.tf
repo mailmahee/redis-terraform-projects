@@ -1,168 +1,119 @@
 #==============================================================================
-# CLUSTER INFORMATION
+# LOCALS FOR COMPLEX OUTPUT VALUES
 #==============================================================================
 
-output "cluster_name" {
-  description = "Name of the Redis Enterprise cluster"
-  value       = local.name_prefix
-}
+locals {
+  verification_commands_text = <<-EOT
+    # Switch to Region 1
+    aws eks update-kubeconfig --region ${local.region_list[0]} --name ${module.redis_cluster_region1.eks_cluster_name}
 
-output "aws_region" {
-  description = "AWS region where resources are deployed"
-  value       = var.aws_region
-}
+    # Check REC status
+    kubectl get rec -n ${var.redis_enterprise_namespace}
 
-#==============================================================================
-# EKS CLUSTER OUTPUTS
-#==============================================================================
+    # Check RERC status (should show Active)
+    kubectl get rerc -n ${var.redis_enterprise_namespace}
 
-output "eks_cluster_id" {
-  description = "EKS cluster ID"
-  value       = module.eks.cluster_id
-}
+    # Check REAADB status (should show Active on all participating clusters)
+    kubectl get reaadb -n ${var.redis_enterprise_namespace}
 
-output "eks_cluster_endpoint" {
-  description = "Endpoint for EKS cluster API server"
-  value       = module.eks.cluster_endpoint
-}
+    # Describe REAADB for detailed status
+    kubectl describe reaadb ${var.aa_database_name} -n ${var.redis_enterprise_namespace}
 
-output "eks_cluster_version" {
-  description = "Kubernetes version of the EKS cluster"
-  value       = module.eks.cluster_version
-}
-
-output "eks_cluster_security_group_id" {
-  description = "Security group ID attached to the EKS cluster"
-  value       = module.eks.cluster_security_group_id
+    # Switch to Region 2 and verify
+    aws eks update-kubeconfig --region ${local.region_list[1]} --name ${module.redis_cluster_region2[0].eks_cluster_name}
+    kubectl get rec,rerc,reaadb -n ${var.redis_enterprise_namespace}
+  EOT
 }
 
 #==============================================================================
-# EKS NODE GROUP OUTPUTS
+# DEPLOYMENT INFORMATION
 #==============================================================================
 
-output "eks_node_group_id" {
-  description = "EKS node group ID"
-  value       = module.eks_node_group.node_group_id
+output "deployment_type" {
+  description = "Type of deployment (single-region or multi-region Active-Active)"
+  value       = length(local.region_list) > 1 ? "multi-region-active-active" : "single-region"
 }
 
-output "eks_node_group_status" {
-  description = "Status of the EKS node group"
-  value       = module.eks_node_group.node_group_status
-}
-
-output "eks_node_security_group_id" {
-  description = "Security group ID attached to EKS worker nodes"
-  value       = module.eks_node_group.node_security_group_id
+output "regions" {
+  description = "List of regions where clusters are deployed"
+  value       = local.region_list
 }
 
 #==============================================================================
-# NETWORK OUTPUTS
+# REGION 1 CLUSTER OUTPUTS
 #==============================================================================
 
-output "vpc_id" {
-  description = "VPC ID"
-  value       = module.vpc.vpc_id
+output "region1_cluster_info" {
+  description = "Region 1 Redis Enterprise cluster information"
+  value = {
+    region               = local.region_list[0]
+    eks_cluster_name     = module.redis_cluster_region1.eks_cluster_name
+    eks_cluster_endpoint = module.redis_cluster_region1.eks_cluster_endpoint
+    vpc_id               = module.redis_cluster_region1.vpc_id
+    redis_namespace      = module.redis_cluster_region1.redis_namespace
+    redis_cluster_name   = module.redis_cluster_region1.redis_cluster_name
+    api_fqdn             = module.redis_cluster_region1.api_fqdn
+    db_fqdn_suffix       = module.redis_cluster_region1.db_fqdn_suffix
+  }
 }
 
-output "public_subnet_ids" {
-  description = "List of public subnet IDs"
-  value       = module.vpc.public_subnet_ids
-}
-
-output "private_subnet_ids" {
-  description = "List of private subnet IDs"
-  value       = module.vpc.private_subnet_ids
-}
-
-#==============================================================================
-# REDIS ENTERPRISE OUTPUTS
-#==============================================================================
-
-output "redis_namespace" {
-  description = "Kubernetes namespace where Redis Enterprise is deployed"
-  value       = module.redis_operator.namespace
-}
-
-output "redis_operator_version" {
-  description = "Version of the Redis Enterprise operator"
-  value       = module.redis_operator.operator_version
-}
-
-output "redis_cluster_name" {
-  description = "Name of the Redis Enterprise cluster (REC)"
-  value       = module.redis_cluster.cluster_name
-}
-
-output "redis_cluster_nodes" {
-  description = "Number of nodes in the Redis Enterprise cluster"
-  value       = module.redis_cluster.node_count
-}
-
-output "redis_database_name" {
-  description = "Name of the sample Redis database (if created)"
-  value       = module.redis_database.database_name
-}
-
-output "redis_database_port" {
-  description = "Port of the sample Redis database"
-  value       = module.redis_database.database_port
+output "region1_configure_kubectl" {
+  description = "Command to configure kubectl for region 1 cluster"
+  value       = module.redis_cluster_region1.configure_kubectl
 }
 
 #==============================================================================
-# STORAGE OUTPUTS
+# REGION 2 CLUSTER OUTPUTS (if multi-region)
 #==============================================================================
 
-output "storage_class_name" {
-  description = "Name of the storage class used for Redis Enterprise"
-  value       = module.ebs_csi_driver.storage_class_name
+output "region2_cluster_info" {
+  description = "Region 2 Redis Enterprise cluster information (if multi-region)"
+  value = length(local.region_list) > 1 ? {
+    region               = local.region_list[1]
+    eks_cluster_name     = module.redis_cluster_region2[0].eks_cluster_name
+    eks_cluster_endpoint = module.redis_cluster_region2[0].eks_cluster_endpoint
+    vpc_id               = module.redis_cluster_region2[0].vpc_id
+    redis_namespace      = module.redis_cluster_region2[0].redis_namespace
+    redis_cluster_name   = module.redis_cluster_region2[0].redis_cluster_name
+    api_fqdn             = module.redis_cluster_region2[0].api_fqdn
+    db_fqdn_suffix       = module.redis_cluster_region2[0].db_fqdn_suffix
+  } : null
 }
 
-output "ebs_csi_driver_version" {
-  description = "Version of the EBS CSI driver addon"
-  value       = module.ebs_csi_driver.ebs_csi_addon_version
-}
-
-#==============================================================================
-# EC2 BASTION OUTPUTS (if created)
-#==============================================================================
-
-output "bastion_instance_id" {
-  description = "EC2 bastion instance ID"
-  value       = var.create_bastion ? module.bastion[0].instance_id : null
-}
-
-output "bastion_public_ip" {
-  description = "EC2 bastion public IP address"
-  value       = var.create_bastion ? module.bastion[0].public_ip : null
-}
-
-output "bastion_ssh_command" {
-  description = "SSH command to connect to bastion instance"
-  value       = var.create_bastion ? module.bastion[0].ssh_command : "Bastion not deployed (set create_bastion=true)"
-}
-
-output "bastion_connection_info" {
-  description = "Complete bastion connection information"
-  value       = var.create_bastion ? module.bastion[0].connection_info : null
-}
-
-output "bastion_available_tools" {
-  description = "Tools installed on bastion instance"
-  value       = var.create_bastion ? module.bastion[0].available_tools : null
-}
-
-output "bastion_usage_guide" {
-  description = "Quick reference for using the bastion instance"
-  value       = var.create_bastion ? module.bastion[0].usage_examples.ssh : "Bastion not deployed (set create_bastion=true in terraform.tfvars)"
+output "region2_configure_kubectl" {
+  description = "Command to configure kubectl for region 2 cluster"
+  value       = length(local.region_list) > 1 ? module.redis_cluster_region2[0].configure_kubectl : null
 }
 
 #==============================================================================
-# KUBECTL CONFIG
+# VPC PEERING OUTPUTS
 #==============================================================================
 
-output "configure_kubectl" {
-  description = "Command to configure kubectl for this cluster"
-  value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${local.name_prefix}"
+output "vpc_peering_status" {
+  description = "Status of VPC peering connections"
+  value       = length(local.region_list) > 1 && length(module.vpc_peering_mesh) > 0 ? module.vpc_peering_mesh[0].peering_connection_status : null
+}
+
+output "vpc_peering_pairs" {
+  description = "List of VPC peering pairs"
+  value       = length(local.region_list) > 1 && length(module.vpc_peering_mesh) > 0 ? module.vpc_peering_mesh[0].region_pairs : null
+}
+
+#==============================================================================
+# ACTIVE-ACTIVE DATABASE OUTPUTS
+#==============================================================================
+
+output "aa_database_name" {
+  description = "Name of the Active-Active database"
+  value       = var.create_aa_database && length(local.region_list) > 1 ? module.aa_database[0].database_name : null
+}
+
+output "aa_database_endpoints" {
+  description = "Active-Active database endpoints in each region"
+  value = var.create_aa_database && length(local.region_list) > 1 ? {
+    (local.region_list[0]) = "${var.aa_database_name}.db.${local.name_prefix}-${local.region_list[0]}.${data.aws_route53_zone.main.name}"
+    (local.region_list[1]) = "${var.aa_database_name}.db.${local.name_prefix}-${local.region_list[1]}.${data.aws_route53_zone.main.name}"
+  } : null
 }
 
 #==============================================================================
@@ -170,92 +121,79 @@ output "configure_kubectl" {
 #==============================================================================
 
 output "access_instructions" {
-  description = "Instructions for accessing the Redis Enterprise cluster"
-  value       = <<-EOT
+  description = "Instructions for accessing the Redis Enterprise clusters"
+  value = <<-EOT
 
     ╔════════════════════════════════════════════════════════════════════════════╗
-    ║            REDIS ENTERPRISE ON EKS - ACCESS INSTRUCTIONS                   ║
+    ║        REDIS ENTERPRISE ON EKS - ACTIVE-ACTIVE ACCESS INSTRUCTIONS         ║
     ╚════════════════════════════════════════════════════════════════════════════╝
 
-    ACCESS MODE: ${var.redis_ui_service_type == "ClusterIP" ? "Internal (ClusterIP)" : "External (LoadBalancer)"}
-    DATABASE SERVICE: ${var.redis_database_service_type == "ClusterIP" ? "Internal (ClusterIP)" : "External (LoadBalancer)"}
-    EXTERNAL ACCESS: ${var.external_access_type != "none" ? "Enabled via ${upper(var.external_access_type)}" : "Disabled"}
+    DEPLOYMENT TYPE: ${length(local.region_list) > 1 ? "Multi-Region Active-Active" : "Single Region"}
+    REGIONS: ${join(", ", local.region_list)}
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    REGION 1: ${local.region_list[0]}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     1. CONFIGURE KUBECTL
-       aws eks update-kubeconfig --region ${var.aws_region} --name ${local.name_prefix}
+       aws eks update-kubeconfig --region ${local.region_list[0]} --name ${module.redis_cluster_region1.eks_cluster_name}
 
     2. VERIFY CLUSTER STATUS
-       kubectl get rec -n ${module.redis_operator.namespace}
-       kubectl get pods -n ${module.redis_operator.namespace}
-       kubectl get svc -n ${module.redis_operator.namespace}
+       kubectl get rec -n ${var.redis_enterprise_namespace}
+       kubectl get pods -n ${var.redis_enterprise_namespace}
+       ${length(local.region_list) > 1 ? "kubectl get rerc -n ${var.redis_enterprise_namespace}" : ""}
+       ${var.create_aa_database && length(local.region_list) > 1 ? "kubectl get reaadb -n ${var.redis_enterprise_namespace}" : ""}
 
     3. ACCESS REDIS ENTERPRISE UI
-       ${var.redis_ui_service_type == "ClusterIP" ? "# Port-forward to access UI from your local machine:\n       kubectl port-forward -n ${module.redis_operator.namespace} svc/${var.cluster_name}-ui 8443:8443\n       \n       # Then access: https://localhost:8443" : "# Access via LoadBalancer (get external IP):\n       kubectl get svc ${var.cluster_name}-ui -n ${module.redis_operator.namespace}"}
+       kubectl port-forward -n ${var.redis_enterprise_namespace} svc/${var.cluster_name}-ui 8443:8443
 
+       Then access: https://localhost:8443
        Username: ${var.redis_cluster_username}
        Password: [your configured password]
 
-    ${var.create_sample_database ? "4. ACCESS SAMPLE DATABASE\n       ${var.sample_db_service_type == "ClusterIP" ? "# Port-forward for local access:\n       kubectl port-forward -n ${module.redis_operator.namespace} svc/${var.sample_db_name} ${var.sample_db_port}:${var.sample_db_port}\n       redis-cli -h localhost -p ${var.sample_db_port}" : "# Access via LoadBalancer (get external IP):\n       kubectl get svc ${var.sample_db_name} -n ${module.redis_operator.namespace}"}\n" : ""}
-    5. DEPLOY TEST APPLICATION (to access Redis from inside cluster)
-       kubectl run redis-test --image=redis:latest -n ${module.redis_operator.namespace} --rm -it -- bash
-       # Inside the pod:
-       redis-cli -h ${var.sample_db_name} -p ${var.sample_db_port}
+    ${length(local.region_list) > 1 ? <<-REGION2
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    REGION 2: ${local.region_list[1]}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    6. VIEW CLUSTER LOGS
-       kubectl logs -n ${module.redis_operator.namespace} -l app=redis-enterprise --tail=100
+    1. CONFIGURE KUBECTL
+       aws eks update-kubeconfig --region ${local.region_list[1]} --name ${module.redis_cluster_region2[0].eks_cluster_name}
 
-    7. GET ADMIN PASSWORD (if forgotten)
-       kubectl get secret ${module.redis_cluster.admin_credentials_secret_name} -n ${module.redis_operator.namespace} -o jsonpath='{.data.password}' | base64 -d
+    2. VERIFY CLUSTER STATUS
+       kubectl get rec -n ${var.redis_enterprise_namespace}
+       kubectl get rerc -n ${var.redis_enterprise_namespace}
+       ${var.create_aa_database ? "kubectl get reaadb -n ${var.redis_enterprise_namespace}" : ""}
+    REGION2
+  : ""}
 
-    ${var.external_access_type == "nginx-ingress" && !var.enable_tls ? "\n    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n    EXTERNAL DATABASE ACCESS (NGINX INGRESS - NON-TLS MODE)\n    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n    ✅ Terraform-managed databases are automatically configured\n    ✅ Fast deployment with on-demand port exposure\n\n    FOR MANUALLY CREATED DATABASES:\n    Run these TWO simple commands after creating a database:\n\n    1. Update TCP ConfigMap:\n       kubectl patch configmap tcp-services -n ingress-nginx \\\\\n         --type merge \\\\\n         -p '{\"data\":{\"<PORT>\":\"redis-enterprise/<SERVICE-NAME>:<PORT>\"}}'\n\n    2. Expose port on NLB:\n       kubectl patch svc ingress-nginx-controller -n ingress-nginx \\\\\n         --type='json' \\\\\n         -p='[{\"op\": \"add\", \"path\": \"/spec/ports/-\", \"value\": {\"name\": \"redis-<PORT>\", \"port\": <PORT>, \"protocol\": \"TCP\", \"targetPort\": <PORT>}}]'\n\n    Example for database on port 15000:\n       kubectl patch configmap tcp-services -n ingress-nginx \\\\\n         --type merge \\\\\n         -p '{\"data\":{\"15000\":\"redis-enterprise/my-db:15000\"}}'\n\n       kubectl patch svc ingress-nginx-controller -n ingress-nginx \\\\\n         --type='json' \\\\\n         -p='[{\"op\": \"add\", \"path\": \"/spec/ports/-\", \"value\": {\"name\": \"redis-15000\", \"port\": 15000, \"protocol\": \"TCP\", \"targetPort\": 15000}}]'\n\n    Then test:\n       redis-cli -h <NLB-DNS> -p 15000 PING\n    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" : ""}
-    ${var.redis_enable_ingress ? "\n    INGRESS ENABLED:\n    - API FQDN: ${var.redis_api_fqdn_url}\n    - DB FQDN Suffix: ${var.redis_db_fqdn_suffix}\n    - Method: ${var.redis_ingress_method}\n" : ""}
+    ${var.create_aa_database && length(local.region_list) > 1 ? <<-AADB
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ACTIVE-ACTIVE DATABASE: ${var.aa_database_name}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Database is replicated across both regions. Connect to either endpoint:
+
+    Region 1 (${local.region_list[0]}):
+       ${var.aa_database_name}.db.${local.name_prefix}-${local.region_list[0]}.${data.aws_route53_zone.main.name}
+
+    Region 2 (${local.region_list[1]}):
+       ${var.aa_database_name}.db.${local.name_prefix}-${local.region_list[1]}.${data.aws_route53_zone.main.name}
+
+    Test connectivity from a pod:
+       kubectl run redis-test --image=redis:latest -n ${var.redis_enterprise_namespace} --rm -it -- bash
+       redis-cli -h ${var.aa_database_name}.db.${local.name_prefix}-${local.region_list[0]}.${data.aws_route53_zone.main.name} PING
+    AADB
+: ""}
+
     ════════════════════════════════════════════════════════════════════════════
   EOT
 }
 
 #==============================================================================
-# NEXT STEPS
+# VERIFICATION COMMANDS
 #==============================================================================
 
-output "next_steps" {
-  description = "Recommended next steps after deployment"
-  value       = <<-EOT
-
-    ╔════════════════════════════════════════════════════════════════════════════╗
-    ║                            NEXT STEPS                                      ║
-    ╚════════════════════════════════════════════════════════════════════════════╝
-
-    ✓ EKS cluster deployed successfully
-    ✓ Redis Enterprise operator installed (bundle: ${var.redis_operator_version})
-    ✓ Redis Enterprise cluster created (${var.redis_cluster_nodes} nodes, HA enabled)
-    ${var.create_sample_database ? "✓ Sample database '${var.sample_db_name}' created (${var.sample_db_shard_count} shard${var.sample_db_shard_count > 1 ? "s" : ""}, HA ${var.sample_db_replication ? "enabled" : "disabled"})\n" : ""}
-
-    RECOMMENDED ACTIONS:
-
-    1. Configure kubectl and verify cluster health
-    2. ${var.redis_ui_service_type == "ClusterIP" ? "Use port-forward to access UI locally" : "Access UI via LoadBalancer external IP"}
-    3. Deploy applications in the cluster to access Redis
-    4. Create additional databases as needed
-    5. ${var.redis_enable_ingress ? "Configure DNS for ingress endpoints" : "Enable ingress for external access (set redis_enable_ingress=true)"}
-    6. Set up monitoring and alerting
-    7. Configure backup strategies
-    8. Review security settings (TLS, network policies, certificates)
-
-    USEFUL COMMANDS:
-
-    # Watch cluster status
-    kubectl get rec -n ${module.redis_operator.namespace} -w
-
-    # View operator logs
-    kubectl logs -n ${module.redis_operator.namespace} -l name=redis-enterprise-operator --tail=50
-
-    # Create additional database
-    kubectl apply -f your-database.yaml
-
-    # Scale node group (if needed)
-    aws eks update-nodegroup-config --cluster-name ${local.name_prefix} \
-      --nodegroup-name ${local.name_prefix}-node-group --scaling-config desiredSize=5
-
-    ════════════════════════════════════════════════════════════════════════════
-  EOT
+output "verification_commands" {
+  description = "Commands to verify the Active-Active deployment"
+  value       = length(local.region_list) > 1 ? local.verification_commands_text : null
 }

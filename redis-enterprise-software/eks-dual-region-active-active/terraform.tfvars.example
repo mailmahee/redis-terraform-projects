@@ -1,0 +1,157 @@
+#==============================================================================
+# DUAL-REGION REDIS ENTERPRISE CONFIGURATION
+#==============================================================================
+# This uses the proven redis-enterprise-eks module twice with VPC peering
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# REGIONS
+#------------------------------------------------------------------------------
+region1 = "us-east-1"
+region2 = "us-west-2"
+
+region1_vpc_cidr = "10.1.0.0/16"
+region2_vpc_cidr = "10.2.0.0/16"
+
+# Leave empty to auto-select AZs
+region1_availability_zones = []
+region2_availability_zones = []
+
+#------------------------------------------------------------------------------
+# BASIC CONFIGURATION
+#------------------------------------------------------------------------------
+user_prefix = "ba"
+cluster_name = "redis-enterprise"
+project = "redis-dual-region"
+environment = "dev"
+owner = "brandon"
+
+#------------------------------------------------------------------------------
+# NETWORK CONFIGURATION
+#------------------------------------------------------------------------------
+enable_nat_gateway = true
+single_nat_gateway = false  # Use one NAT per AZ for HA
+
+#------------------------------------------------------------------------------
+# EKS CONFIGURATION (same for both regions)
+#------------------------------------------------------------------------------
+eks_cluster_version = "1.31"
+node_instance_types = ["m5.xlarge"]
+node_desired_size = 3
+node_min_size = 3
+node_max_size = 6
+node_disk_size = 100
+
+#------------------------------------------------------------------------------
+# REDIS ENTERPRISE CONFIGURATION (same for both regions)
+#------------------------------------------------------------------------------
+redis_operator_version = "7.4.6-2.1"
+redis_nodes = 3
+redis_cluster_username = "admin@redis.com"
+redis_cluster_password = "RedisTest123"  # Change this!
+redis_node_memory = "4Gi"
+redis_node_cpu = "2000m"
+redis_persistent_storage = true
+redis_storage_size = "50Gi"
+redis_ui_service_type = "ClusterIP"
+
+#------------------------------------------------------------------------------
+# SAMPLE DATABASE (optional)
+#------------------------------------------------------------------------------
+create_sample_database = true
+sample_db_name = "sample-db"
+sample_db_port = 12000
+sample_db_memory = "1GB"
+sample_db_replication = true
+sample_db_shard_count = 1
+sample_db_service_type = "ClusterIP"
+
+#------------------------------------------------------------------------------
+# EXTERNAL ACCESS CONFIGURATION
+#------------------------------------------------------------------------------
+# Two types of external access:
+#
+# 1. Client Access (external_access_type): For clients connecting to databases
+#    - Options: "none", "nginx-ingress", "aws-lb"
+#    - Optional: Only needed if you want external clients to access databases
+#
+# 2. Cluster-to-Cluster Access (redis_enable_ingress): For Active-Active
+#    - REQUIRED for Active-Active databases (REAADB)
+#    - Configures ingressOrRouteSpec on REC resource
+#    - Must be enabled with proper DNS configuration
+#------------------------------------------------------------------------------
+
+# Client Access (Optional - for database/UI access from outside Kubernetes)
+external_access_type = "none"           # Options: "none", "nginx-ingress", "aws-lb"
+enable_tls           = false            # Enable TLS for client connections
+ingress_domain       = ""               # Example: "redis.example.com"
+
+# Cluster-to-Cluster Access (REQUIRED for Active-Active)
+# Set to true to enable Active-Active database support
+redis_enable_ingress = false            # Set to TRUE for Active-Active
+redis_ingress_method = "ingress"        # Options: "ingress", "openShiftRoute"
+
+# Region 1 Ingress Configuration (REQUIRED if redis_enable_ingress = true)
+# Format: api-<rec-name>-<namespace>.<domain>
+region1_redis_api_fqdn_url   = ""      # Example: "api-rec-region1-redis-enterprise.example.com"
+region1_redis_db_fqdn_suffix = ""      # Example: "-db-rec-region1-redis-enterprise.example.com"
+
+# Region 2 Ingress Configuration (REQUIRED if redis_enable_ingress = true)
+# Format: api-<rec-name>-<namespace>.<domain>
+region2_redis_api_fqdn_url   = ""      # Example: "api-rec-region2-redis-enterprise.example.com"
+region2_redis_db_fqdn_suffix = ""      # Example: "-db-rec-region2-redis-enterprise.example.com"
+
+#------------------------------------------------------------------------------
+# DNS CONFIGURATION (Optional - for automated Route53 DNS record creation)
+#------------------------------------------------------------------------------
+# If you provide a Route53 hosted zone ID, DNS records will be created automatically
+# for the ingress endpoints. This eliminates the need to manually create DNS records.
+#
+# To find your hosted zone ID:
+#   aws route53 list-hosted-zones --query 'HostedZones[*].[Name,Id]' --output table
+#
+# If left empty, you'll need to manually create DNS records after terraform apply.
+#------------------------------------------------------------------------------
+
+dns_hosted_zone_id       = ""          # Example: "Z1234567890ABC"
+dns_ttl                  = 300         # TTL for DNS records (in seconds)
+validate_dns_propagation = false       # Validate DNS after creation (adds ~30s delay)
+
+#------------------------------------------------------------------------------
+# ACTIVE-ACTIVE QUICK START EXAMPLE
+#------------------------------------------------------------------------------
+# To enable Active-Active, uncomment and configure the following:
+#
+# redis_enable_ingress         = true
+# external_access_type         = "nginx-ingress"  # Installs NGINX Ingress Controller
+# region1_redis_api_fqdn_url   = "api-rec-region1-redis-enterprise.example.com"
+# region1_redis_db_fqdn_suffix = "-db-rec-region1-redis-enterprise.example.com"
+# region2_redis_api_fqdn_url   = "api-rec-region2-redis-enterprise.example.com"
+# region2_redis_db_fqdn_suffix = "-db-rec-region2-redis-enterprise.example.com"
+# dns_hosted_zone_id           = "Z1234567890ABC"  # OPTIONAL: Auto-create DNS records
+#
+# If dns_hosted_zone_id is provided, DNS records will be created automatically.
+# Otherwise, you'll need to manually create DNS records (see ACTIVE-ACTIVE-SETUP.md)
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# REDIS FLEX (optional - requires i3/i4i instances)
+#------------------------------------------------------------------------------
+enable_redis_flex = false
+
+#------------------------------------------------------------------------------
+# BASTION (optional)
+#------------------------------------------------------------------------------
+create_bastion = false
+bastion_instance_type = "t3.micro"
+bastion_key_name = ""
+bastion_allowed_cidr_blocks = ["0.0.0.0/0"]
+
+#------------------------------------------------------------------------------
+# ADDITIONAL TAGS
+#------------------------------------------------------------------------------
+tags = {
+  CostCenter = "engineering"
+  Team       = "platform"
+}
+

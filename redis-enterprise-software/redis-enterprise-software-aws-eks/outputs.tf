@@ -74,6 +74,21 @@ output "private_subnet_ids" {
   value       = module.vpc.private_subnet_ids
 }
 
+output "private_route_table_ids" {
+  description = "List of private route table IDs"
+  value       = module.vpc.private_route_table_ids
+}
+
+output "eks_cluster_name" {
+  description = "EKS cluster name"
+  value       = module.eks.cluster_name
+}
+
+output "eks_cluster_certificate_authority_data" {
+  description = "EKS cluster certificate authority data"
+  value       = module.eks.cluster_certificate_authority_data
+}
+
 #==============================================================================
 # REDIS ENTERPRISE OUTPUTS
 #==============================================================================

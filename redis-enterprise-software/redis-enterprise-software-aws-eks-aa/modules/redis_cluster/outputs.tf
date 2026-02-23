@@ -17,3 +17,8 @@ output "node_count" {
   description = "Number of nodes in the Redis Enterprise cluster"
   value       = var.node_count
 }
+
+output "cluster_ready" {
+  description = "Dependency marker — set only after REC reaches Running state"
+  value       = null_resource.wait_for_cluster.id
+}

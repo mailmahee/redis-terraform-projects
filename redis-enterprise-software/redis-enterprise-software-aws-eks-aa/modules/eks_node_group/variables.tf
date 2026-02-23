@@ -53,3 +53,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "peer_region_cidrs" {
+  description = "List of peer region VPC CIDRs for Active-Active cross-region communication"
+  type        = list(string)
+  default     = []
+}

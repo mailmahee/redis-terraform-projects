@@ -94,3 +94,4 @@ resource "time_sleep" "wait_for_operator" {
 
   create_duration = "60s" # Increased for bundle deployment
 }
+

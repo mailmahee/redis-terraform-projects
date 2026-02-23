@@ -415,8 +415,8 @@ resource "null_resource" "expose_database_ports" {
 
   # Force recreation if port changes or if service state changes
   triggers = {
-    port            = each.value.port
-    service_name    = each.value.service_name
-    configmap_hash  = md5(jsonencode(kubernetes_config_map_v1.tcp_services[0].data))
+    port           = each.value.port
+    service_name   = each.value.service_name
+    configmap_hash = md5(jsonencode(kubernetes_config_map_v1.tcp_services[0].data))
   }
 }
