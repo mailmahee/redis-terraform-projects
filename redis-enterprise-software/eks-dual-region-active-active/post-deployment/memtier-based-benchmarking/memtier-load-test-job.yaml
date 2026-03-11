@@ -1,0 +1,162 @@
+---
+#==============================================================================
+# MEMTIER BENCHMARK LOAD TEST - ACTIVE-ACTIVE CRDB
+#==============================================================================
+# Generates ~180K ops/sec load against your Active-Active database
+# - 8 parallel pods (each rate-limited to ~22.5K ops/sec)
+# - Each pod gets unique key range (no overlap, perfect distribution)
+# - 70% reads / 30% writes (ratio=1:3)
+# - 256-byte payload
+# - Random pattern (R:R) with pipeline=1
+# - 5-minute test duration
+#
+# ⚠️ BEFORE RUNNING: Update the REDIS_PORT value below (line 82)
+#    Get the correct port with:
+#      kubectl get svc micron-crdb-prod -n redis-enterprise
+#
+# Usage:
+#   kubectl apply -f memtier-load-test-job.yaml
+#   kubectl get pods -l job-name=memtier-load-test -n redis-enterprise -w
+#   kubectl logs -l job-name=memtier-load-test -n redis-enterprise --tail=-1 | grep "Totals"
+#
+# Cleanup:
+#   kubectl delete job memtier-load-test -n redis-enterprise
+#==============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memtier-load-test
+  namespace: redis-enterprise
+  labels:
+    app: memtier-benchmark
+    test-type: load-generation
+    database: micron-crdb-prod
+spec:
+  # Run 8 pods in parallel with indexed completion (0-7)
+  parallelism: 8
+  completions: 8
+  completionMode: Indexed
+  
+  # Keep job history for 1 hour after completion
+  ttlSecondsAfterFinished: 3600
+  
+  # Retry failed pods up to 2 times
+  backoffLimit: 2
+  
+  template:
+    metadata:
+      labels:
+        app: memtier-load-test
+        job-name: memtier-load-test
+    spec:
+      restartPolicy: Never
+      
+      containers:
+      - name: memtier-benchmark
+        image: redislabs/memtier_benchmark:latest
+        
+        # Resource allocation: 4 vCPU, 8GB RAM per pod
+        resources:
+          requests:
+            cpu: "4000m"
+            memory: "8Gi"
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+        
+        # Environment variables for Redis connection
+        env:
+        - name: REDIS_HOST
+          value: "micron-crdb-prod.redis-enterprise.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "11946"  # ⚠️ UPDATE THIS: kubectl get svc micron-crdb-prod -n redis-enterprise
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        
+        # memtier_benchmark command
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "=========================================="
+          echo "Starting memtier_benchmark Load Test"
+          echo "Pod: $POD_NAME"
+          echo "Target: $REDIS_HOST:$REDIS_PORT"
+          echo "Database: micron-crdb-prod (Active-Active CRDB)"
+          echo "=========================================="
+          echo ""
+
+          # Calculate unique key range for this pod
+          # Each pod gets 2M keys (1-indexed, memtier doesn't accept key-minimum=0)
+          # Extract pod index from pod name (format: memtier-load-test-0-xxxxx)
+          POD_INDEX=$(echo $POD_NAME | sed 's/memtier-load-test-\([0-9]\+\)-.*/\1/')
+
+          # Validate POD_INDEX is a number, default to 0 if not
+          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
+            echo "Warning: Could not extract pod index from name, defaulting to 0"
+            POD_INDEX=0
+          fi
+
+          KEYS_PER_POD=2000000
+          KEY_MIN=$((POD_INDEX * KEYS_PER_POD + 1))
+          KEY_MAX=$(((POD_INDEX + 1) * KEYS_PER_POD))
+
+          echo "Pod Index: $POD_INDEX"
+          echo "Key range: $KEY_MIN - $KEY_MAX (2M keys)"
+          echo ""
+
+          # Run memtier_benchmark
+          # - 50 clients per pod
+          # - 4 threads per pod
+          # - 256-byte payload
+          # - Random pattern (R:R) - uniform distribution across key range
+          # - Pipeline=1 (no pipelining for realistic latency)
+          # - 5-minute test duration
+          # - Unique key range per pod (no overlap)
+
+          memtier_benchmark \
+            --server=$REDIS_HOST \
+            --port=$REDIS_PORT \
+            --protocol=redis \
+            --clients=50 \
+            --threads=4 \
+            --ratio=1:3 \
+            --data-size=256 \
+            --key-pattern=R:R \
+            --key-minimum=$KEY_MIN \
+            --key-maximum=$KEY_MAX \
+            --pipeline=1 \
+            --test-time=300 \
+            --print-percentiles=50,90,95,99,99.9 \
+            --run-count=1
+
+          EXIT_CODE=$?
+          
+          echo ""
+          echo "=========================================="
+          echo "Test completed with exit code: $EXIT_CODE"
+          echo "Pod: $POD_NAME"
+          echo "=========================================="
+          
+          exit $EXIT_CODE
+      
+      # Tolerate node taints if any
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      
+      # Spread pods across different nodes for better distribution
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - memtier-load-test
+              topologyKey: kubernetes.io/hostname
