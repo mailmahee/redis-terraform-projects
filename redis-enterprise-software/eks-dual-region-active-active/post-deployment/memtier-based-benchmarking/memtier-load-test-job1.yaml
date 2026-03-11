@@ -1,0 +1,141 @@
+---
+#==============================================================================
+# MEMTIER BENCHMARK LOAD TEST - KUBERNETES JOB
+#==============================================================================
+# Generates 125K ops/sec load against Redis Enterprise database
+# - 6 parallel pods (each generating ~25K ops/sec)
+# - 70% reads / 30% writes
+# - 256-byte payload
+# - 5-minute test duration
+#
+# Usage:
+#   kubectl apply -f memtier-load-test-job.yaml
+#   kubectl get pods -l job-name=memtier-load-test -w
+#   kubectl logs -l job-name=memtier-load-test --tail=-1 | grep "Totals"
+#
+# Cleanup:
+#   kubectl delete job memtier-load-test
+#==============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memtier-load-test
+  namespace: redis-enterprise
+  labels:
+    app: memtier-benchmark
+    test-type: load-generation
+spec:
+  # Run 6 pods in parallel
+  parallelism: 6
+  completions: 6
+  
+  # Keep job history for 1 hour after completion
+  ttlSecondsAfterFinished: 3600
+  
+  # Retry failed pods up to 2 times
+  backoffLimit: 2
+  
+  template:
+    metadata:
+      labels:
+        app: memtier-load-test
+        job-name: memtier-load-test
+    spec:
+      restartPolicy: Never
+      
+      containers:
+      - name: memtier-benchmark
+        image: redislabs/memtier_benchmark:latest
+        
+        # Resource allocation: 3 vCPU, 6GB RAM per pod
+        resources:
+          requests:
+            cpu: "3000m"
+            memory: "6Gi"
+          limits:
+            cpu: "3000m"
+            memory: "6Gi"
+        
+        # Environment variables for Redis connection
+        env:
+        - name: REDIS_HOST
+          value: "sample-db.redis-enterprise.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "12000"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redb-sample-db
+              key: password
+              optional: true
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        
+        # memtier_benchmark command
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "=========================================="
+          echo "Starting memtier_benchmark Load Test"
+          echo "Pod: $POD_NAME"
+          echo "Target: $REDIS_HOST:$REDIS_PORT"
+          echo "=========================================="
+          echo ""
+          
+          # Run memtier_benchmark
+          # - 50 clients per pod
+          # - 4 threads per pod
+          # - 70% reads (ratio 7:3 = GET:SET)
+          # - 256-byte payload
+          # - Random keys (R:R pattern)
+          # - 5-minute test duration
+          
+          memtier_benchmark \
+            --server=$REDIS_HOST \
+            --port=$REDIS_PORT \
+            --authenticate=$REDIS_PASSWORD \
+            --protocol=redis \
+            --clients=50 \
+            --threads=4 \
+            --ratio=7:3 \
+            --data-size=256 \
+            --key-pattern=R:R \
+            --key-minimum=1 \
+            --key-maximum=1000000 \
+            --random-data \
+            --test-time=300 \
+            --print-percentiles=50,90,95,99 \
+            --run-count=1
+          
+          EXIT_CODE=$?
+          
+          echo ""
+          echo "=========================================="
+          echo "Test completed with exit code: $EXIT_CODE"
+          echo "Pod: $POD_NAME"
+          echo "=========================================="
+          
+          exit $EXIT_CODE
+      
+      # Tolerate node taints if any
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      
+      # Spread pods across different nodes for better distribution
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - memtier-load-test
+              topologyKey: kubernetes.io/hostname
+

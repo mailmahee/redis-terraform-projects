@@ -1,0 +1,107 @@
+---
+#==============================================================================
+# MEMTIER BENCHMARK LATENCY TEST
+#==============================================================================
+# Low-load test focused on measuring latency characteristics
+# - 2 parallel pods (low concurrency)
+# - ~10K ops/sec total load
+# - 70% reads / 30% writes
+# - 256-byte payload
+# - No pipelining (pipeline=1) for accurate latency measurement
+# - 10-minute test duration for stable results
+#==============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memtier-latency-test
+  namespace: redis-enterprise
+  labels:
+    app: memtier-benchmark
+    test-type: latency-measurement
+    database: micron-crdb-prod
+spec:
+  parallelism: 2
+  completions: 2
+  completionMode: Indexed
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  
+  template:
+    metadata:
+      labels:
+        app: memtier-latency-test
+        job-name: memtier-latency-test
+    spec:
+      restartPolicy: Never
+      
+      containers:
+      - name: memtier-benchmark
+        image: redislabs/memtier_benchmark:latest
+        
+        resources:
+          requests:
+            cpu: "2000m"
+            memory: "4Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        
+        env:
+        - name: REDIS_HOST
+          value: "micron-crdb-prod.redis-enterprise.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "12190"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "=========================================="
+          echo "Starting memtier_benchmark Latency Test"
+          echo "Pod: $POD_NAME"
+          echo "Target: $REDIS_HOST:$REDIS_PORT"
+          echo "Focus: Low-load latency measurement"
+          echo "=========================================="
+          echo ""
+
+          POD_INDEX=$(echo $POD_NAME | sed 's/memtier-latency-test-\([0-9]\+\)-.*/\1/')
+          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
+            POD_INDEX=0
+          fi
+
+          KEYS_PER_POD=1000000
+          KEY_MIN=$((POD_INDEX * KEYS_PER_POD + 1))
+          KEY_MAX=$(((POD_INDEX + 1) * KEYS_PER_POD))
+
+          echo "Pod Index: $POD_INDEX"
+          echo "Key range: $KEY_MIN - $KEY_MAX"
+          echo ""
+
+          memtier_benchmark \
+            --server=$REDIS_HOST \
+            --port=$REDIS_PORT \
+            --protocol=redis \
+            --clients=25 \
+            --threads=2 \
+            --ratio=1:3 \
+            --data-size=256 \
+            --key-pattern=R:R \
+            --key-minimum=$KEY_MIN \
+            --key-maximum=$KEY_MAX \
+            --pipeline=1 \
+            --test-time=600 \
+            --print-percentiles=50,75,90,95,99,99.9,99.99 \
+            --run-count=1
+
+          EXIT_CODE=$?
+          
+          echo ""
+          echo "=========================================="
+          echo "Latency test completed: $EXIT_CODE"
+          echo "=========================================="
+          
+          exit $EXIT_CODE

@@ -1,0 +1,124 @@
+---
+#==============================================================================
+# MEMTIER BENCHMARK MAXIMUM THROUGHPUT TEST
+#==============================================================================
+# High-load test to find maximum sustainable ops/sec
+# - 16 parallel pods (high concurrency)
+# - Target: ~500K+ ops/sec
+# - 70% reads / 30% writes
+# - 256-byte payload
+# - Pipeline=10 for maximum throughput
+# - 10-minute test duration
+#==============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memtier-max-throughput
+  namespace: redis-enterprise
+  labels:
+    app: memtier-benchmark
+    test-type: max-throughput
+    database: micron-crdb-prod
+spec:
+  parallelism: 16
+  completions: 16
+  completionMode: Indexed
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  
+  template:
+    metadata:
+      labels:
+        app: memtier-max-throughput
+        job-name: memtier-max-throughput
+    spec:
+      restartPolicy: Never
+      
+      containers:
+      - name: memtier-benchmark
+        image: redislabs/memtier_benchmark:latest
+        
+        resources:
+          requests:
+            cpu: "4000m"
+            memory: "8Gi"
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+        
+        env:
+        - name: REDIS_HOST
+          value: "micron-crdb-prod.redis-enterprise.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "12190"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "=========================================="
+          echo "Starting memtier_benchmark Max Throughput Test"
+          echo "Pod: $POD_NAME"
+          echo "Target: $REDIS_HOST:$REDIS_PORT"
+          echo "Focus: Maximum sustainable ops/sec"
+          echo "=========================================="
+          echo ""
+
+          POD_INDEX=$(echo $POD_NAME | sed 's/memtier-max-throughput-\([0-9]\+\)-.*/\1/')
+          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
+            POD_INDEX=0
+          fi
+
+          KEYS_PER_POD=2000000
+          KEY_MIN=$((POD_INDEX * KEYS_PER_POD + 1))
+          KEY_MAX=$(((POD_INDEX + 1) * KEYS_PER_POD))
+
+          echo "Pod Index: $POD_INDEX"
+          echo "Key range: $KEY_MIN - $KEY_MAX"
+          echo ""
+
+          memtier_benchmark \
+            --server=$REDIS_HOST \
+            --port=$REDIS_PORT \
+            --protocol=redis \
+            --clients=100 \
+            --threads=8 \
+            --ratio=1:3 \
+            --data-size=256 \
+            --key-pattern=R:R \
+            --key-minimum=$KEY_MIN \
+            --key-maximum=$KEY_MAX \
+            --pipeline=10 \
+            --test-time=600 \
+            --print-percentiles=50,90,95,99,99.9 \
+            --run-count=1
+
+          EXIT_CODE=$?
+          
+          echo ""
+          echo "=========================================="
+          echo "Max throughput test completed: $EXIT_CODE"
+          echo "=========================================="
+          
+          exit $EXIT_CODE
+      
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - memtier-max-throughput
+              topologyKey: kubernetes.io/hostname
