@@ -14,14 +14,11 @@ This directory contains Kubernetes Job manifests for running `memtier_benchmark`
 
 ## 📋 Available Tests
 
-### 1. Active-Active CRDB Load Test (✨ Auto-Discovery)
+### 1. Active-Active CRDB Load Test
 
-**Files:**
-- `memtier-load-test-job.yaml` - Main benchmark job
-- `memtier-rbac.yaml` - RBAC permissions for auto-discovery
+**File:** `memtier-load-test-job.yaml`
 
-**Features:**
-- ✨ **Auto-discovers database port** - no manual configuration needed!
+**Configuration:**
 - 8 parallel pods (indexed completion)
 - ~180K ops/sec total load (configurable)
 - 70% reads / 30% writes
@@ -31,24 +28,18 @@ This directory contains Kubernetes Job manifests for running `memtier_benchmark`
 
 **Usage:**
 ```bash
-# One-time setup: Apply RBAC permissions
-kubectl apply -f memtier-rbac.yaml
-
 # Deploy load test
-kubectl apply -f memtier-load-test-job.yaml
+kubectl apply -f memtier-load-test-job.yaml --context region1
 
 # Watch pods
-kubectl get pods -l job-name=memtier-load-test -n redis-enterprise -w
+kubectl get pods -l job-name=memtier-load-test -n redis-enterprise -w --context region1
 
 # View results
-kubectl logs -l job-name=memtier-load-test -n redis-enterprise --tail=-1 | grep "Totals"
+kubectl logs -l job-name=memtier-load-test -n redis-enterprise --tail=-1 --context region1 | grep "Totals"
 
 # Cleanup
-kubectl delete job memtier-load-test -n redis-enterprise
+kubectl delete job memtier-load-test -n redis-enterprise --context region1
 ```
-
-**How Auto-Discovery Works:**
-The job uses an init container to query the Kubernetes API and automatically detect the database service port. This means you can run the same YAML across different deployments without modification!
 
 ---
 

@@ -1,4 +1,6 @@
 # Terraform
+*.tfstate
+*.tfstate.*
 .terraform/
 .terraform.lock.hcl
 terraform.tfstate
@@ -9,6 +11,21 @@ terraform.tfstate.backup
 
 # Terraform variable files (keep .example files)
 terraform.tfvars
+*.auto.tfvars
+
+# Generated Kubernetes manifests (created by Terraform)
+deploy/generated/
+
+# Auto-generated configuration (created by Terraform)
+post-deployment/config.env
+
+# Backup files
+*.backup
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # Crash log files
 crash.log

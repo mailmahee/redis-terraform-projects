@@ -1,0 +1,27 @@
+#==============================================================================
+# REDIS ENTERPRISE MONITORING UI CONFIGURATION
+# Most values are auto-extracted from Terraform state and kubectl
+#==============================================================================
+
+# User-configurable parameters only
+deployment_region: region1  # region1 or region2 - where to deploy the UI pod
+refresh_interval: 5         # Auto-refresh interval in seconds
+
+# Optional overrides (leave empty to auto-detect)
+namespace: ""              # Auto-detected from terraform.tfvars
+database_name: ""          # Auto-detected from REAADB resources
+
+# Resource limits (optional customization)
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Image configuration
+image:
+  repository: python
+  tag: "3.11-slim"
+  pullPolicy: IfNotPresent

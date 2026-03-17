@@ -42,9 +42,15 @@ variable "region2_availability_zones" {
 # BASIC CONFIGURATION (shared across both regions)
 #==============================================================================
 
-variable "user_prefix" {
+variable "project_prefix" {
   description = "Prefix for resource names"
   type        = string
+}
+
+variable "aws_profile" {
+  description = "AWS CLI profile to use for authentication"
+  type        = string
+  default     = "default"
 }
 
 variable "cluster_name" {
@@ -93,43 +99,111 @@ variable "single_nat_gateway" {
 }
 
 #==============================================================================
-# EKS CONFIGURATION (shared across both regions)
+# EKS CONFIGURATION (shared defaults, can be overridden per region)
 #==============================================================================
 
 variable "eks_cluster_version" {
-  description = "Kubernetes version"
+  description = "Kubernetes version (shared across both regions)"
   type        = string
   default     = "1.31"
 }
 
 variable "node_instance_types" {
-  description = "EC2 instance types for EKS nodes"
+  description = "EC2 instance types for EKS nodes (default for both regions)"
   type        = list(string)
-  default     = ["m5.xlarge"]
+  default     = ["r7i.8xlarge"]
 }
 
 variable "node_desired_size" {
-  description = "Desired number of nodes"
+  description = "Desired number of nodes (default for both regions)"
   type        = number
   default     = 3
 }
 
 variable "node_min_size" {
-  description = "Minimum number of nodes"
+  description = "Minimum number of nodes (default for both regions)"
   type        = number
   default     = 3
 }
 
 variable "node_max_size" {
-  description = "Maximum number of nodes"
+  description = "Maximum number of nodes (default for both regions)"
   type        = number
   default     = 6
 }
 
 variable "node_disk_size" {
-  description = "Disk size for nodes (GB)"
+  description = "Disk size for nodes in GB (default for both regions)"
   type        = number
   default     = 100
+}
+
+#==============================================================================
+# REGION 1 EKS OVERRIDES (optional - uses shared defaults if not specified)
+#==============================================================================
+
+variable "region1_node_instance_types" {
+  description = "EC2 instance types for Region 1 EKS nodes (overrides node_instance_types)"
+  type        = list(string)
+  default     = null
+}
+
+variable "region1_node_desired_size" {
+  description = "Desired number of nodes for Region 1 (overrides node_desired_size)"
+  type        = number
+  default     = null
+}
+
+variable "region1_node_min_size" {
+  description = "Minimum number of nodes for Region 1 (overrides node_min_size)"
+  type        = number
+  default     = null
+}
+
+variable "region1_node_max_size" {
+  description = "Maximum number of nodes for Region 1 (overrides node_max_size)"
+  type        = number
+  default     = null
+}
+
+variable "region1_node_disk_size" {
+  description = "Disk size for Region 1 nodes in GB (overrides node_disk_size)"
+  type        = number
+  default     = null
+}
+
+#==============================================================================
+# REGION 2 EKS OVERRIDES (optional - uses shared defaults if not specified)
+#==============================================================================
+
+variable "region2_node_instance_types" {
+  description = "EC2 instance types for Region 2 EKS nodes (overrides node_instance_types)"
+  type        = list(string)
+  default     = null
+}
+
+variable "region2_node_desired_size" {
+  description = "Desired number of nodes for Region 2 (overrides node_desired_size)"
+  type        = number
+  default     = null
+}
+
+variable "region2_node_min_size" {
+  description = "Minimum number of nodes for Region 2 (overrides node_min_size)"
+  type        = number
+  default     = null
+}
+
+variable "region2_node_max_size" {
+  description = "Maximum number of nodes for Region 2 (overrides node_max_size)"
+  type        = number
+  default     = null
+}
+
+variable "region2_node_disk_size" {
+  description = "Disk size for Region 2 nodes in GB (overrides node_disk_size)"
+  type        = number
+  default     = null
 }
 
 #==============================================================================
@@ -137,9 +211,15 @@ variable "node_disk_size" {
 #==============================================================================
 
 variable "redis_operator_version" {
-  description = "Redis Enterprise operator version"
+  description = "Redis Enterprise operator version (e.g., 'v8.0.10-23')"
   type        = string
-  default     = "7.4.6-2.1"
+  default     = "v8.0.10-23"
+}
+
+variable "redis_enterprise_version_tag" {
+  description = "Redis Enterprise image version tag (e.g., '8.0.10-81')"
+  type        = string
+  default     = "8.0.10-81"
 }
 
 variable "redis_nodes" {
