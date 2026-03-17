@@ -64,3 +64,8 @@ terraform.rc
 .idea/
 *.iml
 
+# Generated deployment manifests (created by deployment scripts)
+post-deployment/01-active-active-crdb/reaadb.yaml
+post-deployment/01-active-active-crdb/region1-*.yaml
+post-deployment/01-active-active-crdb/region2-*.yaml
+post-deployment/01-active-active-crdb/diagnose-and-fix.sh
