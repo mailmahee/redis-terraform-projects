@@ -41,7 +41,7 @@ echo -e "${BLUE}📋 Checking configuration files...${NC}"
 echo ""
 
 # Extract project_prefix from terraform.tfvars
-TFVARS_PREFIX=$(grep '^project_prefix' terraform.tfvars | sed 's/.*=\s*"\(.*\)".*/\1/' | tr -d ' ')
+TFVARS_PREFIX=$(grep '^project_prefix' terraform.tfvars | awk -F'=' '{print $2}' | tr -d ' "' | tr -d "'")
 
 # Extract PROJECT_PREFIX from config.env
 source post-deployment/config.env
