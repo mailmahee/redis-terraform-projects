@@ -60,6 +60,11 @@ done
 
 echo -e "${GREEN}✅ Configuration loaded${NC}"
 echo ""
+
+# Use full ARN contexts for kubectl
+REGION1_CONTEXT="arn:aws:eks:${AWS_REGION1}:735486936198:cluster/${REGION1_CLUSTER_NAME}"
+REGION2_CONTEXT="arn:aws:eks:${AWS_REGION2}:735486936198:cluster/${REGION2_CLUSTER_NAME}"
+
 echo "CRDB Configuration:"
 echo "  Name: $CRDB_NAME"
 echo "  Memory: $CRDB_MEMORY"
@@ -69,8 +74,8 @@ echo "  Persistence: $CRDB_PERSISTENCE"
 echo "  Eviction Policy: $CRDB_EVICTION_POLICY"
 echo ""
 echo "Participating Clusters:"
-echo "  Region 1: $REGION1_REC_NAME (context: $REGION1_CONTEXT)"
-echo "  Region 2: $REGION2_REC_NAME (context: $REGION2_CONTEXT)"
+echo "  Region 1: $REGION1_REC_NAME"
+echo "  Region 2: $REGION2_REC_NAME"
 echo ""
 
 # Generate REAADB manifest from template
@@ -119,6 +124,163 @@ if [ "$REC2_STATUS" != "Running" ]; then
 fi
 
 echo -e "${GREEN}✅ Both RECs are Running${NC}"
+echo ""
+
+# Get REC credentials
+echo -e "${BLUE}🔐 Getting REC credentials...${NC}"
+REC1_USER=$(kubectl get secret $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || echo "")
+REC1_PASS=$(kubectl get secret $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
+REC2_USER=$(kubectl get secret $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || echo "")
+REC2_PASS=$(kubectl get secret $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
+
+if [ -z "$REC1_USER" ] || [ -z "$REC1_PASS" ] || [ -z "$REC2_USER" ] || [ -z "$REC2_PASS" ]; then
+    echo -e "${RED}❌ Failed to get REC credentials${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ Credentials retrieved${NC}"
+echo ""
+
+# Get REC API endpoints from LoadBalancer services
+echo -e "${BLUE}🔍 Getting REC API LoadBalancer endpoints...${NC}"
+REC1_LB=$(kubectl get svc ${REGION1_REC_NAME}-api-lb -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+REC2_LB=$(kubectl get svc ${REGION2_REC_NAME}-api-lb -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+
+if [ -z "$REC1_LB" ] || [ -z "$REC2_LB" ]; then
+    echo -e "${RED}❌ LoadBalancer services not found${NC}"
+    echo "Please run ./create-lb-services.sh first"
+    exit 1
+fi
+
+# Note: apiFqdnUrl should NOT include https:// prefix - the operator adds it automatically
+REC1_API="${REC1_LB}:9443"
+REC2_API="${REC2_LB}:9443"
+
+echo "  Region 1 API: $REC1_API"
+echo "  Region 2 API: $REC2_API"
+echo -e "${GREEN}✅ API endpoints retrieved${NC}"
+echo ""
+
+# Create credential secrets for remote clusters
+echo -e "${BLUE}🔐 Creating credential secrets for remote clusters...${NC}"
+
+# Secret in Region 1 for accessing Region 2 (must be named redis-enterprise-<RERC name>)
+cat > "$SCRIPT_DIR/region2-remote-secret.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-enterprise-${REGION2_REC_NAME}
+  namespace: $NAMESPACE
+type: Opaque
+stringData:
+  username: "$REC2_USER"
+  password: "$REC2_PASS"
+EOF
+
+# Secret in Region 2 for accessing Region 1 (must be named redis-enterprise-<RERC name>)
+cat > "$SCRIPT_DIR/region1-remote-secret.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-enterprise-${REGION1_REC_NAME}
+  namespace: $NAMESPACE
+type: Opaque
+stringData:
+  username: "$REC1_USER"
+  password: "$REC1_PASS"
+EOF
+
+kubectl apply -f "$SCRIPT_DIR/region2-remote-secret.yaml" --context $REGION1_CONTEXT
+kubectl apply -f "$SCRIPT_DIR/region1-remote-secret.yaml" --context $REGION2_CONTEXT
+
+echo -e "${GREEN}✅ Credential secrets created${NC}"
+echo ""
+
+# Create RERC (RedisEnterpriseRemoteCluster) resources
+echo -e "${BLUE}🔗 Creating Remote Cluster resources...${NC}"
+
+# RERC in Region 1 pointing to itself (local)
+cat > "$SCRIPT_DIR/region1-local-rerc.yaml" <<EOF
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseRemoteCluster
+metadata:
+  name: $REGION1_REC_NAME
+  namespace: $NAMESPACE
+spec:
+  recName: $REGION1_REC_NAME
+  recNamespace: $NAMESPACE
+  apiFqdnUrl: $REC1_API
+  dbFqdnSuffix: -db.${REGION1_REC_NAME}.${NAMESPACE}.svc.cluster.local
+  secretName: redis-enterprise-${REGION1_REC_NAME}
+EOF
+
+# RERC in Region 1 pointing to Region 2 (remote)
+cat > "$SCRIPT_DIR/region1-remote-rerc.yaml" <<EOF
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseRemoteCluster
+metadata:
+  name: $REGION2_REC_NAME
+  namespace: $NAMESPACE
+spec:
+  recName: $REGION2_REC_NAME
+  recNamespace: $NAMESPACE
+  apiFqdnUrl: $REC2_API
+  dbFqdnSuffix: -db.${REGION2_REC_NAME}.${NAMESPACE}.svc.cluster.local
+  secretName: redis-enterprise-${REGION2_REC_NAME}
+EOF
+
+# RERC in Region 2 pointing to itself (local)
+cat > "$SCRIPT_DIR/region2-local-rerc.yaml" <<EOF
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseRemoteCluster
+metadata:
+  name: $REGION2_REC_NAME
+  namespace: $NAMESPACE
+spec:
+  recName: $REGION2_REC_NAME
+  recNamespace: $NAMESPACE
+  apiFqdnUrl: $REC2_API
+  dbFqdnSuffix: -db.${REGION2_REC_NAME}.${NAMESPACE}.svc.cluster.local
+  secretName: redis-enterprise-${REGION2_REC_NAME}
+EOF
+
+# RERC in Region 2 pointing to Region 1 (remote)
+cat > "$SCRIPT_DIR/region2-remote-rerc.yaml" <<EOF
+apiVersion: app.redislabs.com/v1alpha1
+kind: RedisEnterpriseRemoteCluster
+metadata:
+  name: $REGION1_REC_NAME
+  namespace: $NAMESPACE
+spec:
+  recName: $REGION1_REC_NAME
+  recNamespace: $NAMESPACE
+  apiFqdnUrl: $REC1_API
+  dbFqdnSuffix: -db.${REGION1_REC_NAME}.${NAMESPACE}.svc.cluster.local
+  secretName: redis-enterprise-${REGION1_REC_NAME}
+EOF
+
+kubectl apply -f "$SCRIPT_DIR/region1-local-rerc.yaml" --context $REGION1_CONTEXT
+kubectl apply -f "$SCRIPT_DIR/region1-remote-rerc.yaml" --context $REGION1_CONTEXT
+kubectl apply -f "$SCRIPT_DIR/region2-local-rerc.yaml" --context $REGION2_CONTEXT
+kubectl apply -f "$SCRIPT_DIR/region2-remote-rerc.yaml" --context $REGION2_CONTEXT
+
+echo -e "${GREEN}✅ Remote Cluster resources created${NC}"
+echo ""
+
+# Wait for RERC resources to be ready
+echo -e "${YELLOW}⏳ Waiting for RERC resources to be ready...${NC}"
+sleep 10
+
+# Verify RERC status
+RERC1_LOCAL=$(kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
+RERC1_REMOTE=$(kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
+RERC2_LOCAL=$(kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
+RERC2_REMOTE=$(kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
+
+echo "  Region 1 - Local RERC: $RERC1_LOCAL"
+echo "  Region 1 - Remote RERC (to Region 2): $RERC1_REMOTE"
+echo "  Region 2 - Local RERC: $RERC2_LOCAL"
+echo "  Region 2 - Remote RERC (to Region 1): $RERC2_REMOTE"
 echo ""
 
 # Deploy REAADB
