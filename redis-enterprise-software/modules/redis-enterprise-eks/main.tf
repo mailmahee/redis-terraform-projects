@@ -315,6 +315,11 @@ module "external_access" {
   redis_ui_service_name = "${var.cluster_name}-ui"
   expose_redis_ui       = var.expose_redis_ui
 
+  # Redis Enterprise API (for Active-Active)
+  redis_cluster_name = var.cluster_name
+  expose_redis_api   = var.redis_enable_ingress
+  redis_api_fqdn     = var.redis_api_fqdn_url
+
   # Redis Enterprise Databases
   redis_db_services = var.create_sample_database ? {
     "${var.sample_db_name}" = {

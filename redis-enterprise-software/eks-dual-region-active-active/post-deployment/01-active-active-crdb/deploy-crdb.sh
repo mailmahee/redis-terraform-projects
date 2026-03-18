@@ -141,24 +141,17 @@ fi
 echo -e "${GREEN}✅ Credentials retrieved${NC}"
 echo ""
 
-# Get REC API endpoints from LoadBalancer services
-echo -e "${BLUE}🔍 Getting REC API LoadBalancer endpoints...${NC}"
-REC1_LB=$(kubectl get svc ${REGION1_REC_NAME}-api-lb -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-REC2_LB=$(kubectl get svc ${REGION2_REC_NAME}-api-lb -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-
-if [ -z "$REC1_LB" ] || [ -z "$REC2_LB" ]; then
-    echo -e "${RED}❌ LoadBalancer services not found${NC}"
-    echo "Please run ./create-lb-services.sh first"
-    exit 1
-fi
+# Get REC API endpoints from NGINX Ingress (configured via Terraform)
+echo -e "${BLUE}🔍 Using NGINX Ingress API endpoints...${NC}"
 
 # Note: apiFqdnUrl should NOT include https:// prefix - the operator adds it automatically
-REC1_API="${REC1_LB}:9443"
-REC2_API="${REC2_LB}:9443"
+# The NGINX Ingress controller handles TLS termination/passthrough
+REC1_API="${REGION1_API_FQDN}"
+REC2_API="${REGION2_API_FQDN}"
 
 echo "  Region 1 API: $REC1_API"
 echo "  Region 2 API: $REC2_API"
-echo -e "${GREEN}✅ API endpoints retrieved${NC}"
+echo -e "${GREEN}✅ API endpoints configured${NC}"
 echo ""
 
 # Create credential secrets for remote clusters
@@ -211,7 +204,7 @@ spec:
   recNamespace: $NAMESPACE
   apiFqdnUrl: $REC1_API
   dbFqdnSuffix: -db.${REGION1_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: redis-enterprise-${REGION1_REC_NAME}
+  secretName: ${REGION1_REC_NAME}
 EOF
 
 # RERC in Region 1 pointing to Region 2 (remote)
@@ -241,7 +234,7 @@ spec:
   recNamespace: $NAMESPACE
   apiFqdnUrl: $REC2_API
   dbFqdnSuffix: -db.${REGION2_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: redis-enterprise-${REGION2_REC_NAME}
+  secretName: ${REGION2_REC_NAME}
 EOF
 
 # RERC in Region 2 pointing to Region 1 (remote)
