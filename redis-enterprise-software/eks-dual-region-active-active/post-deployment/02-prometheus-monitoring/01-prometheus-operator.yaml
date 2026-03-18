@@ -1,0 +1,23 @@
+#==============================================================================
+# PROMETHEUS OPERATOR INSTALLATION
+#==============================================================================
+# This file references the official Prometheus Operator bundle
+# The bundle includes:
+# - Custom Resource Definitions (CRDs) for Prometheus, ServiceMonitor, etc.
+# - RBAC permissions for the operator
+# - Operator deployment
+#
+# Source: https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/bundle.yaml
+#
+# IMPORTANT: This file is a placeholder. The actual installation is done via
+# kubectl apply -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/bundle.yaml
+#
+# The deploy-monitoring.sh script will handle this installation.
+#==============================================================================
+
+# NOTE: The Prometheus Operator bundle will be applied from the remote URL
+# during deployment. This ensures we always get the latest stable version.
+#
+# The bundle creates resources in the 'default' namespace by default, but
+# we'll configure our Prometheus instance in the 'monitoring' namespace.
+
