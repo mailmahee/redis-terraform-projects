@@ -374,3 +374,173 @@ EOT
   file_permission = "0644"
 }
 
+#==============================================================================
+# PROMETHEUS MONITORING - GENERATED YAML FILES
+#==============================================================================
+# Generate monitoring YAML files from templates for both regions
+# These files are created in the generated/ directory and used by deploy-monitoring.sh
+#==============================================================================
+
+# Create generated directory structure
+resource "local_file" "monitoring_generated_dir_region1" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/.gitkeep"
+  content  = ""
+}
+
+resource "local_file" "monitoring_generated_dir_region2" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/.gitkeep"
+  content  = ""
+}
+
+# Region 1 - Monitoring YAML files
+resource "local_file" "monitoring_namespace_region1" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/00-namespace.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/00-namespace.yaml.tpl", {})
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_prometheus_region1" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/02-prometheus-instance.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/02-prometheus-instance.yaml.tpl", {
+    prometheus_replicas            = var.prometheus_replicas
+    prometheus_memory_request      = var.prometheus_memory_request
+    prometheus_cpu_request         = var.prometheus_cpu_request
+    prometheus_memory_limit        = var.prometheus_memory_limit
+    prometheus_cpu_limit           = var.prometheus_cpu_limit
+    prometheus_storage_size        = var.prometheus_storage_size
+    prometheus_retention           = var.prometheus_retention
+    prometheus_scrape_interval     = var.prometheus_scrape_interval
+    prometheus_scrape_timeout      = var.prometheus_scrape_timeout
+    prometheus_evaluation_interval = var.prometheus_evaluation_interval
+    cluster_name                   = var.cluster_name
+    environment                    = var.environment
+    region                         = var.region1
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_servicemonitor_region1" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/servicemonitor.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/servicemonitor.yaml.tpl", {
+    prometheus_scrape_interval = var.prometheus_scrape_interval
+    redis_metrics_scheme       = var.redis_metrics_scheme
+    redis_metrics_path         = var.redis_metrics_path
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_rules_region1" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/prometheus-rules.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/prometheus-rules.yaml.tpl", {
+    alert_redis_memory_threshold     = var.alert_redis_memory_threshold
+    alert_redis_cpu_threshold        = var.alert_redis_cpu_threshold
+    alert_redis_connection_threshold = var.alert_redis_connection_threshold
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_grafana_region1" {
+  count    = var.prometheus_enabled && var.grafana_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/03-grafana.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/03-grafana.yaml.tpl", {
+    grafana_replicas        = var.grafana_replicas
+    grafana_memory_request  = var.grafana_memory_request
+    grafana_cpu_request     = var.grafana_cpu_request
+    grafana_memory_limit    = var.grafana_memory_limit
+    grafana_cpu_limit       = var.grafana_cpu_limit
+    grafana_admin_password  = var.grafana_admin_password
+    prometheus_scrape_interval = var.prometheus_scrape_interval
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_loadbalancer_region1" {
+  count    = var.prometheus_enabled && var.grafana_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/04-prometheus-loadbalancer.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/04-prometheus-loadbalancer.yaml.tpl", {
+    environment = var.environment
+  })
+  file_permission = "0644"
+}
+
+# Region 2 - Monitoring YAML files
+resource "local_file" "monitoring_namespace_region2" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/00-namespace.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/00-namespace.yaml.tpl", {})
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_prometheus_region2" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/02-prometheus-instance.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/02-prometheus-instance.yaml.tpl", {
+    prometheus_replicas            = var.prometheus_replicas
+    prometheus_memory_request      = var.prometheus_memory_request
+    prometheus_cpu_request         = var.prometheus_cpu_request
+    prometheus_memory_limit        = var.prometheus_memory_limit
+    prometheus_cpu_limit           = var.prometheus_cpu_limit
+    prometheus_storage_size        = var.prometheus_storage_size
+    prometheus_retention           = var.prometheus_retention
+    prometheus_scrape_interval     = var.prometheus_scrape_interval
+    prometheus_scrape_timeout      = var.prometheus_scrape_timeout
+    prometheus_evaluation_interval = var.prometheus_evaluation_interval
+    cluster_name                   = var.cluster_name
+    environment                    = var.environment
+    region                         = var.region2
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_servicemonitor_region2" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/servicemonitor.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/servicemonitor.yaml.tpl", {
+    prometheus_scrape_interval = var.prometheus_scrape_interval
+    redis_metrics_scheme       = var.redis_metrics_scheme
+    redis_metrics_path         = var.redis_metrics_path
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_rules_region2" {
+  count    = var.prometheus_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/prometheus-rules.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/prometheus-rules.yaml.tpl", {
+    alert_redis_memory_threshold     = var.alert_redis_memory_threshold
+    alert_redis_cpu_threshold        = var.alert_redis_cpu_threshold
+    alert_redis_connection_threshold = var.alert_redis_connection_threshold
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_grafana_region2" {
+  count    = var.prometheus_enabled && var.grafana_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/03-grafana.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/03-grafana.yaml.tpl", {
+    grafana_replicas        = var.grafana_replicas
+    grafana_memory_request  = var.grafana_memory_request
+    grafana_cpu_request     = var.grafana_cpu_request
+    grafana_memory_limit    = var.grafana_memory_limit
+    grafana_cpu_limit       = var.grafana_cpu_limit
+    grafana_admin_password  = var.grafana_admin_password
+    prometheus_scrape_interval = var.prometheus_scrape_interval
+  })
+  file_permission = "0644"
+}
+
+resource "local_file" "monitoring_loadbalancer_region2" {
+  count    = var.prometheus_enabled && var.grafana_enabled ? 1 : 0
+  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/04-prometheus-loadbalancer.yaml"
+  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/04-prometheus-loadbalancer.yaml.tpl", {
+    environment = var.environment
+  })
+  file_permission = "0644"
+}
+

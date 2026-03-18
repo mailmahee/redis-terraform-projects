@@ -19,8 +19,22 @@
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1800px;
             margin: 0 auto;
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+        }
+
+        .content-area {
+            min-width: 0;
+        }
+
+        .sidebar {
+            min-width: 0;
         }
         
         header {
@@ -152,7 +166,132 @@
             grid-template-columns: 1fr 1fr;
             gap: 20px;
         }
-        
+
+        /* Failure Simulation Panel */
+        .failure-sim-panel {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 20px;
+        }
+
+        .failure-sim-panel h2 {
+            color: #dc2626;
+            font-size: 20px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #dc2626;
+            padding-bottom: 10px;
+        }
+
+        .sim-section {
+            margin-bottom: 25px;
+        }
+
+        .sim-section h3 {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .sim-dropdown {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #d1d5db;
+            border-radius: 5px;
+            font-size: 14px;
+            margin-bottom: 10px;
+            background: white;
+        }
+
+        .sim-button {
+            width: 100%;
+            padding: 18px 24px;
+            font-size: 16px;
+            font-weight: 700;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .sim-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+
+        .sim-button:active {
+            transform: translateY(0);
+        }
+
+        .sim-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-node-failure {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            margin-bottom: 15px;
+        }
+
+        .btn-node-failure:hover:not(:disabled) {
+            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+        }
+
+        .btn-region-failure {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: white;
+        }
+
+        .btn-region-failure:hover:not(:disabled) {
+            background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%);
+        }
+
+        .sim-info {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 12px;
+            margin-top: 15px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #92400e;
+        }
+
+        .sim-warning {
+            background: #fee2e2;
+            border-left: 4px solid #dc2626;
+            padding: 12px;
+            margin-top: 15px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #991b1b;
+        }
+
+        .node-count {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .failure-sim-panel {
+                position: relative;
+                top: 0;
+            }
+        }
+
         @media (max-width: 768px) {
             .grid {
                 grid-template-columns: 1fr;
@@ -181,35 +320,71 @@
             </div>
         </header>
 
-        <div class="grid">
-            <!-- Region 1 Cluster -->
-            <div class="card">
-                <h2>🌍 Region 1: {{ config.regions.region1.name }}</h2>
-                <div id="region1-cluster" class="loading">Loading...</div>
+        <div class="main-layout">
+            <div class="content-area">
+                <div class="grid">
+                    <!-- Region 1 Cluster -->
+                    <div class="card">
+                        <h2>🌍 Region 1: {{ config.regions.region1.name }}</h2>
+                        <div id="region1-cluster" class="loading">Loading...</div>
+                    </div>
+
+                    <!-- Region 2 Cluster -->
+                    <div class="card">
+                        <h2>🌍 Region 2: {{ config.regions.region2.name }}</h2>
+                        <div id="region2-cluster" class="loading">Loading...</div>
+                    </div>
+
+                    <!-- Region 1 Database -->
+                    <div class="card">
+                        <h2>💾 Database: Region 1</h2>
+                        <div id="region1-database" class="loading">Loading...</div>
+                    </div>
+
+                    <!-- Region 2 Database -->
+                    <div class="card">
+                        <h2>💾 Database: Region 2</h2>
+                        <div id="region2-database" class="loading">Loading...</div>
+                    </div>
+
+                    <!-- CRDB Status -->
+                    <div class="card crdb-section">
+                        <h2>🔄 Active-Active CRDB Status</h2>
+                        <div id="crdb-status" class="loading">Loading...</div>
+                    </div>
+                </div>
             </div>
 
-            <!-- Region 2 Cluster -->
-            <div class="card">
-                <h2>🌍 Region 2: {{ config.regions.region2.name }}</h2>
-                <div id="region2-cluster" class="loading">Loading...</div>
-            </div>
+            <div class="sidebar">
+                <div class="failure-sim-panel">
+                    <h2>⚠️ Failure Simulation</h2>
 
-            <!-- Region 1 Database -->
-            <div class="card">
-                <h2>💾 Database: Region 1</h2>
-                <div id="region1-database" class="loading">Loading...</div>
-            </div>
+                    <!-- Node Failure Section -->
+                    <div class="sim-section">
+                        <h3>Node Failure</h3>
+                        <select id="node-selector" class="sim-dropdown">
+                            <option value="">Loading nodes...</option>
+                        </select>
+                        <div class="node-count" id="node-count">Detecting nodes...</div>
+                        <button id="btn-node-failure" class="sim-button btn-node-failure" disabled>
+                            ⚡ Simulate Node Failure
+                        </button>
+                        <div class="sim-info">
+                            <strong>Info:</strong> This will cordon and drain the selected EKS node running Redis Enterprise pods.
+                        </div>
+                    </div>
 
-            <!-- Region 2 Database -->
-            <div class="card">
-                <h2>💾 Database: Region 2</h2>
-                <div id="region2-database" class="loading">Loading...</div>
-            </div>
-
-            <!-- CRDB Status -->
-            <div class="card crdb-section">
-                <h2>🔄 Active-Active CRDB Status</h2>
-                <div id="crdb-status" class="loading">Loading...</div>
+                    <!-- Region Failure Section -->
+                    <div class="sim-section">
+                        <h3>Region Failure</h3>
+                        <button id="btn-region-failure" class="sim-button btn-region-failure">
+                            💥 Simulate Region Failure
+                        </button>
+                        <div class="sim-warning">
+                            <strong>Warning:</strong> This feature is coming soon. It will simulate a complete region outage.
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -372,18 +547,115 @@
         // Handle refresh interval change
         document.getElementById('refresh-interval').addEventListener('change', function(e) {
             refreshInterval = parseInt(e.target.value);
-            
+
             if (intervalId) {
                 clearInterval(intervalId);
             }
-            
+
             if (refreshInterval > 0) {
                 intervalId = setInterval(fetchData, refreshInterval * 1000);
             }
         });
 
+        // Fetch nodes for failure simulation
+        async function fetchNodes() {
+            try {
+                const response = await fetch('/api/nodes/{{ config.deployment_region }}');
+                const data = await response.json();
+
+                const nodeSelector = document.getElementById('node-selector');
+                const nodeCount = document.getElementById('node-count');
+                const btnNodeFailure = document.getElementById('btn-node-failure');
+
+                if (data.error) {
+                    nodeSelector.innerHTML = '<option value="">Error loading nodes</option>';
+                    nodeCount.textContent = 'Error: ' + data.error;
+                    btnNodeFailure.disabled = true;
+                    return;
+                }
+
+                if (data.nodes && data.nodes.length > 0) {
+                    nodeSelector.innerHTML = '<option value="">Select a node...</option>';
+                    data.nodes.forEach(node => {
+                        const option = document.createElement('option');
+                        option.value = node.name;
+                        option.textContent = `${node.name} (${node.pod_count} Redis pods)`;
+                        nodeSelector.appendChild(option);
+                    });
+                    nodeCount.textContent = `Found ${data.nodes.length} node(s) with Redis Enterprise pods`;
+                } else {
+                    nodeSelector.innerHTML = '<option value="">No nodes found</option>';
+                    nodeCount.textContent = 'No nodes with Redis Enterprise pods found';
+                    btnNodeFailure.disabled = true;
+                }
+            } catch (error) {
+                console.error('Error fetching nodes:', error);
+                document.getElementById('node-selector').innerHTML = '<option value="">Error loading nodes</option>';
+                document.getElementById('node-count').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        // Enable/disable node failure button based on selection
+        document.getElementById('node-selector').addEventListener('change', function(e) {
+            const btnNodeFailure = document.getElementById('btn-node-failure');
+            btnNodeFailure.disabled = !e.target.value;
+        });
+
+        // Handle node failure simulation
+        document.getElementById('btn-node-failure').addEventListener('click', async function() {
+            const nodeSelector = document.getElementById('node-selector');
+            const nodeName = nodeSelector.value;
+
+            if (!nodeName) {
+                alert('Please select a node first');
+                return;
+            }
+
+            if (!confirm('Are you sure you want to simulate failure on node: ' + nodeName + '?\\n\\nThis will cordon and drain the node.')) {
+                return;
+            }
+
+            const btnNodeFailure = document.getElementById('btn-node-failure');
+            btnNodeFailure.disabled = true;
+            btnNodeFailure.textContent = '⏳ Simulating failure...';
+
+            try {
+                const response = await fetch('/api/simulate/node-failure', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        node_name: nodeName,
+                        region: '{{ config.deployment_region }}'
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert('✅ Node failure simulated successfully!\\n\\nNode: ' + nodeName + '\\nStatus: ' + result.status + '\\n\\nThe node has been cordoned and pods are being drained.');
+                    // Refresh node list
+                    await fetchNodes();
+                } else {
+                    alert('❌ Error: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('❌ Error simulating node failure: ' + error.message);
+            } finally {
+                btnNodeFailure.disabled = false;
+                btnNodeFailure.textContent = '⚡ Simulate Node Failure';
+            }
+        });
+
+        // Handle region failure simulation (placeholder)
+        document.getElementById('btn-region-failure').addEventListener('click', function() {
+            alert('⚠️ Region Failure Simulation\\n\\nThis feature is coming soon!\\n\\nIt will simulate a complete region outage by affecting all nodes in the region.');
+        });
+
         // Initial load
         fetchData();
+        fetchNodes(); // Load nodes for failure simulation
 
         // Start auto-refresh
         if (refreshInterval > 0) {

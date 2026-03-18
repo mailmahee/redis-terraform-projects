@@ -138,10 +138,24 @@ echo ""
 deploy_monitoring_stack() {
     local CONTEXT=$1
     local REGION_NAME=$2
+    local REGION_DIR=$3  # region1 or region2
 
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}🚀 Deploying Monitoring Stack to $REGION_NAME${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    # Check if generated files exist
+    GENERATED_DIR="$SCRIPT_DIR/generated/$REGION_DIR"
+    if [ ! -d "$GENERATED_DIR" ]; then
+        echo -e "${RED}❌ ERROR: Generated files not found at $GENERATED_DIR${NC}"
+        echo ""
+        echo "Please run 'terraform apply' first to generate the monitoring YAML files."
+        echo ""
+        exit 1
+    fi
+
+    # Change to generated directory for this region
+    cd "$GENERATED_DIR"
 
     # Step 1: Create monitoring namespace
     echo -e "${BLUE}📦 Step 1/6: Creating monitoring namespace...${NC}"
@@ -168,14 +182,22 @@ deploy_monitoring_stack() {
         echo -e "  ${BLUE}   See LOCAL-GRAFANA-SETUP.md for setup instructions${NC}"
     else
         echo -e "${BLUE}📦 Step 4/7: Deploying Grafana to cluster...${NC}"
-        kubectl apply -f 03-grafana.yaml --context $CONTEXT
+        if [ -f "03-grafana.yaml" ]; then
+            kubectl apply -f 03-grafana.yaml --context $CONTEXT
+        else
+            echo -e "${YELLOW}⚠️  WARNING: 03-grafana.yaml not found (grafana_enabled=false in terraform.tfvars)${NC}"
+        fi
     fi
 
     # Step 5: Skip LoadBalancer when using local Grafana (not needed with port-forward)
     if [ "$SKIP_GRAFANA" = "false" ]; then
         echo -e "${BLUE}📦 Step 5/7: Deploying Prometheus LoadBalancer...${NC}"
         echo "  (For cross-region in-cluster Grafana access)"
-        kubectl apply -f 04-prometheus-loadbalancer.yaml --context $CONTEXT
+        if [ -f "04-prometheus-loadbalancer.yaml" ]; then
+            kubectl apply -f 04-prometheus-loadbalancer.yaml --context $CONTEXT
+        else
+            echo -e "${YELLOW}⚠️  WARNING: 04-prometheus-loadbalancer.yaml not found (grafana_enabled=false in terraform.tfvars)${NC}"
+        fi
     else
         echo -e "${GREEN}📦 Step 5/7: Skipping Prometheus LoadBalancer${NC}"
         echo "  (Not needed - local Grafana uses port-forward)"
@@ -189,6 +211,9 @@ deploy_monitoring_stack() {
     echo -e "${BLUE}📦 Step 7/7: Deploying Prometheus alert rules...${NC}"
     kubectl apply -f prometheus-rules.yaml --context $CONTEXT
 
+    # Return to script directory
+    cd "$SCRIPT_DIR"
+
     echo -e "${GREEN}✅ Monitoring stack deployed to $REGION_NAME${NC}"
     echo ""
 }
@@ -201,19 +226,19 @@ case "$DEPLOY_TARGET" in
     region1)
         echo -e "${YELLOW}📍 Deploying to Region 1 only${NC}"
         echo ""
-        deploy_monitoring_stack "$REGION1_CONTEXT" "Region 1 (${AWS_REGION1})"
+        deploy_monitoring_stack "$REGION1_CONTEXT" "Region 1 (${AWS_REGION1})" "region1"
         ;;
     region2)
         echo -e "${YELLOW}📍 Deploying to Region 2 only${NC}"
         echo ""
-        deploy_monitoring_stack "$REGION2_CONTEXT" "Region 2 (${AWS_REGION2})"
+        deploy_monitoring_stack "$REGION2_CONTEXT" "Region 2 (${AWS_REGION2})" "region2"
         ;;
     both)
         echo -e "${YELLOW}📍 Deploying to both regions${NC}"
         echo ""
-        deploy_monitoring_stack "$REGION1_CONTEXT" "Region 1 (${AWS_REGION1})"
+        deploy_monitoring_stack "$REGION1_CONTEXT" "Region 1 (${AWS_REGION1})" "region1"
         echo ""
-        deploy_monitoring_stack "$REGION2_CONTEXT" "Region 2 (${AWS_REGION2})"
+        deploy_monitoring_stack "$REGION2_CONTEXT" "Region 2 (${AWS_REGION2})" "region2"
         ;;
 esac
 

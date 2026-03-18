@@ -19,6 +19,12 @@ deploy/generated/
 # Auto-generated configuration (created by Terraform)
 post-deployment/config.env
 
+# Auto-generated monitoring UI config (created by deployment script)
+post-deployment/04-redis-monitoring-ui/auto-config.yaml
+
+# Generated monitoring YAML files (created by Terraform)
+post-deployment/02-prometheus-monitoring/generated/
+
 # Backup files
 *.backup
 *.bak

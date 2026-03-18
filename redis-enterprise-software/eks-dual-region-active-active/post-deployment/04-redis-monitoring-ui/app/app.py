@@ -9,11 +9,22 @@ import json
 import requests
 import yaml
 from datetime import datetime
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from urllib3.exceptions import InsecureRequestWarning
+from kubernetes import client, config
 
 # Suppress SSL warnings (Redis Enterprise uses self-signed certs)
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
+# Load Kubernetes config (in-cluster)
+try:
+    config.load_incluster_config()
+except:
+    # Fallback to kubeconfig for local development
+    try:
+        config.load_kube_config()
+    except:
+        print("Warning: Could not load Kubernetes configuration")
 
 app = Flask(__name__)
 
@@ -161,6 +172,101 @@ def get_crdb_status():
 def health():
     """Health check endpoint"""
     return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
+
+@app.route('/api/nodes/<region>')
+def get_nodes(region):
+    """Get EKS nodes running Redis Enterprise pods"""
+    try:
+        v1 = client.CoreV1Api()
+        namespace = config.get('namespace', 'redis-enterprise')
+
+        # Get all pods in the redis-enterprise namespace
+        pods = v1.list_namespaced_pod(namespace=namespace)
+
+        # Get unique node names running Redis Enterprise pods
+        node_pod_count = {}
+        for pod in pods.items:
+            if pod.spec.node_name:
+                node_name = pod.spec.node_name
+                if node_name not in node_pod_count:
+                    node_pod_count[node_name] = 0
+                node_pod_count[node_name] += 1
+
+        # Build node list with pod counts
+        nodes = []
+        for node_name, pod_count in node_pod_count.items():
+            nodes.append({
+                "name": node_name,
+                "pod_count": pod_count
+            })
+
+        # Sort by node name
+        nodes.sort(key=lambda x: x['name'])
+
+        return jsonify({
+            "region": region,
+            "nodes": nodes,
+            "total_nodes": len(nodes),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/simulate/node-failure', methods=['POST'])
+def simulate_node_failure():
+    """Simulate node failure by cordoning and draining a node"""
+    try:
+        data = request.get_json()
+        node_name = data.get('node_name')
+        region = data.get('region')
+
+        if not node_name:
+            return jsonify({"error": "node_name is required"}), 400
+
+        v1 = client.CoreV1Api()
+
+        # Get the node
+        try:
+            node = v1.read_node(name=node_name)
+        except client.exceptions.ApiException as e:
+            return jsonify({"error": f"Node not found: {node_name}"}), 404
+
+        # Cordon the node (mark as unschedulable)
+        node.spec.unschedulable = True
+        v1.patch_node(name=node_name, body=node)
+
+        # Delete pods on the node to simulate drain
+        # (In production, you might want to use a more graceful drain)
+        namespace = config.get('namespace', 'redis-enterprise')
+        pods = v1.list_namespaced_pod(
+            namespace=namespace,
+            field_selector=f'spec.nodeName={node_name}'
+        )
+
+        deleted_pods = []
+        for pod in pods.items:
+            try:
+                v1.delete_namespaced_pod(
+                    name=pod.metadata.name,
+                    namespace=namespace,
+                    body=client.V1DeleteOptions()
+                )
+                deleted_pods.append(pod.metadata.name)
+            except Exception as e:
+                print(f"Error deleting pod {pod.metadata.name}: {e}")
+
+        return jsonify({
+            "status": "success",
+            "node_name": node_name,
+            "region": region,
+            "cordoned": True,
+            "deleted_pods": deleted_pods,
+            "pod_count": len(deleted_pods),
+            "message": f"Node {node_name} has been cordoned and {len(deleted_pods)} pod(s) deleted",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)

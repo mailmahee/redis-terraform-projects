@@ -31,8 +31,9 @@ spec:
               pip install --no-cache-dir \
                 flask==3.0.0 \
                 requests==2.31.0 \
-                pyyaml==6.0.1
-              
+                pyyaml==6.0.1 \
+                kubernetes==28.1.0
+
               # Copy installed packages to shared volume
               cp -r /usr/local/lib/python3.11/site-packages/* /app/packages/
           volumeMounts:

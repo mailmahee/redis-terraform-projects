@@ -488,3 +488,170 @@ variable "bastion_allowed_cidr_blocks" {
   default     = ["0.0.0.0/0"]
 }
 
+#==============================================================================
+# PROMETHEUS MONITORING CONFIGURATION
+#==============================================================================
+
+variable "prometheus_enabled" {
+  description = "Enable Prometheus monitoring stack deployment"
+  type        = bool
+  default     = true
+}
+
+variable "prometheus_operator_version" {
+  description = "Prometheus Operator version (tag from prometheus-operator/prometheus-operator repo)"
+  type        = string
+  default     = "v0.70.0"
+}
+
+variable "prometheus_replicas" {
+  description = "Number of Prometheus replicas for high availability"
+  type        = number
+  default     = 2
+}
+
+variable "prometheus_retention" {
+  description = "Prometheus data retention period (e.g., 30d, 7d, 90d)"
+  type        = string
+  default     = "30d"
+}
+
+variable "prometheus_storage_size" {
+  description = "Prometheus persistent storage size (e.g., 10Gi, 50Gi, 100Gi)"
+  type        = string
+  default     = "10Gi"
+}
+
+variable "prometheus_cpu_request" {
+  description = "Prometheus CPU request (e.g., 500m, 1000m)"
+  type        = string
+  default     = "500m"
+}
+
+variable "prometheus_cpu_limit" {
+  description = "Prometheus CPU limit (e.g., 2000m, 4000m)"
+  type        = string
+  default     = "2000m"
+}
+
+variable "prometheus_memory_request" {
+  description = "Prometheus memory request (e.g., 2Gi, 4Gi)"
+  type        = string
+  default     = "2Gi"
+}
+
+variable "prometheus_memory_limit" {
+  description = "Prometheus memory limit (e.g., 4Gi, 8Gi)"
+  type        = string
+  default     = "4Gi"
+}
+
+variable "prometheus_scrape_interval" {
+  description = "Default metrics scrape interval (e.g., 15s, 30s, 60s)"
+  type        = string
+  default     = "15s"
+}
+
+variable "prometheus_scrape_timeout" {
+  description = "Scrape timeout (e.g., 10s, 15s)"
+  type        = string
+  default     = "10s"
+}
+
+variable "prometheus_evaluation_interval" {
+  description = "Rule evaluation interval (e.g., 15s, 30s)"
+  type        = string
+  default     = "15s"
+}
+
+#==============================================================================
+# GRAFANA CONFIGURATION
+#==============================================================================
+
+variable "grafana_enabled" {
+  description = "Deploy Grafana to Kubernetes cluster (false = use local Grafana on Mac - recommended)"
+  type        = bool
+  default     = false
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password (change in production!)"
+  type        = string
+  sensitive   = true
+  default     = "admin123"
+}
+
+variable "grafana_replicas" {
+  description = "Number of Grafana replicas"
+  type        = number
+  default     = 1
+}
+
+variable "grafana_cpu_request" {
+  description = "Grafana CPU request"
+  type        = string
+  default     = "100m"
+}
+
+variable "grafana_cpu_limit" {
+  description = "Grafana CPU limit"
+  type        = string
+  default     = "500m"
+}
+
+variable "grafana_memory_request" {
+  description = "Grafana memory request"
+  type        = string
+  default     = "256Mi"
+}
+
+variable "grafana_memory_limit" {
+  description = "Grafana memory limit"
+  type        = string
+  default     = "512Mi"
+}
+
+#==============================================================================
+# SERVICEMONITOR CONFIGURATION
+#==============================================================================
+
+variable "redis_metrics_port" {
+  description = "Redis Enterprise metrics port"
+  type        = number
+  default     = 8070
+}
+
+variable "redis_metrics_path" {
+  description = "Redis Enterprise metrics endpoint path"
+  type        = string
+  default     = "/"
+}
+
+variable "redis_metrics_scheme" {
+  description = "Redis Enterprise metrics scheme (http or https)"
+  type        = string
+  default     = "https"
+}
+
+#==============================================================================
+# ALERT RULES CONFIGURATION
+#==============================================================================
+
+variable "alert_redis_memory_threshold" {
+  description = "Alert threshold for Redis memory usage (percentage, 0-100)"
+  type        = number
+  default     = 90
+}
+
+variable "alert_redis_cpu_threshold" {
+  description = "Alert threshold for Redis CPU usage (percentage, 0-100)"
+  type        = number
+  default     = 80
+}
+
+variable "alert_redis_connection_threshold" {
+  description = "Alert threshold for Redis connection count"
+  type        = number
+  default     = 10000
+}
+
