@@ -170,6 +170,6 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/name: prometheus
-    prometheus: main
+    prometheus: prometheus
 
 
