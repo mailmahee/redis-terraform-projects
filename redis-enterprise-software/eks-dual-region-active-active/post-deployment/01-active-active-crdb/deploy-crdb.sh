@@ -222,75 +222,22 @@ kubectl apply -f "$SCRIPT_DIR/region1-remote-secret.yaml" --context $REGION2_CON
 echo -e "${GREEN}✅ Credential secrets created${NC}"
 echo ""
 
-# Create RERC (RedisEnterpriseRemoteCluster) resources
-echo -e "${BLUE}🔗 Creating Remote Cluster resources...${NC}"
+# NOTE: RERC resources are now created by Terraform with Route53 FQDNs
+# This script only creates the secrets. If you need to manually create RERCs,
+# uncomment the section below and update the apiFqdnUrl to use Route53 FQDNs.
 
-# RERC in Region 1 pointing to itself (local)
-cat > "$SCRIPT_DIR/region1-local-rerc.yaml" <<EOF
-apiVersion: app.redislabs.com/v1alpha1
-kind: RedisEnterpriseRemoteCluster
-metadata:
-  name: $REGION1_REC_NAME
-  namespace: $NAMESPACE
-spec:
-  recName: $REGION1_REC_NAME
-  recNamespace: $NAMESPACE
-  apiFqdnUrl: $REC1_API
-  dbFqdnSuffix: -db.${REGION1_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: redis-enterprise-${REGION1_REC_NAME}
-EOF
+echo -e "${BLUE}🔗 Verifying Remote Cluster resources...${NC}"
 
-# RERC in Region 1 pointing to Region 2 (remote)
-cat > "$SCRIPT_DIR/region1-remote-rerc.yaml" <<EOF
-apiVersion: app.redislabs.com/v1alpha1
-kind: RedisEnterpriseRemoteCluster
-metadata:
-  name: $REGION2_REC_NAME
-  namespace: $NAMESPACE
-spec:
-  recName: $REGION2_REC_NAME
-  recNamespace: $NAMESPACE
-  apiFqdnUrl: $REC2_API
-  dbFqdnSuffix: -db.${REGION2_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: redis-enterprise-${REGION2_REC_NAME}
-EOF
+# Verify RERCs exist
+RERC1_EXISTS=$(kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT 2>/dev/null && echo "yes" || echo "no")
+RERC2_EXISTS=$(kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT 2>/dev/null && echo "yes" || echo "no")
 
-# RERC in Region 2 pointing to itself (local)
-cat > "$SCRIPT_DIR/region2-local-rerc.yaml" <<EOF
-apiVersion: app.redislabs.com/v1alpha1
-kind: RedisEnterpriseRemoteCluster
-metadata:
-  name: $REGION2_REC_NAME
-  namespace: $NAMESPACE
-spec:
-  recName: $REGION2_REC_NAME
-  recNamespace: $NAMESPACE
-  apiFqdnUrl: $REC2_API
-  dbFqdnSuffix: -db.${REGION2_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: redis-enterprise-${REGION2_REC_NAME}
-EOF
+if [ "$RERC1_EXISTS" != "yes" ] || [ "$RERC2_EXISTS" != "yes" ]; then
+    echo -e "${RED}❌ RERC resources not found. Please run 'terraform apply' first.${NC}"
+    exit 1
+fi
 
-# RERC in Region 2 pointing to Region 1 (remote)
-cat > "$SCRIPT_DIR/region2-remote-rerc.yaml" <<EOF
-apiVersion: app.redislabs.com/v1alpha1
-kind: RedisEnterpriseRemoteCluster
-metadata:
-  name: $REGION1_REC_NAME
-  namespace: $NAMESPACE
-spec:
-  recName: $REGION1_REC_NAME
-  recNamespace: $NAMESPACE
-  apiFqdnUrl: $REC1_API
-  dbFqdnSuffix: -db.${REGION1_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: redis-enterprise-${REGION1_REC_NAME}
-EOF
-
-kubectl apply -f "$SCRIPT_DIR/region1-local-rerc.yaml" --context $REGION1_CONTEXT
-kubectl apply -f "$SCRIPT_DIR/region1-remote-rerc.yaml" --context $REGION1_CONTEXT
-kubectl apply -f "$SCRIPT_DIR/region2-local-rerc.yaml" --context $REGION2_CONTEXT
-kubectl apply -f "$SCRIPT_DIR/region2-remote-rerc.yaml" --context $REGION2_CONTEXT
-
-echo -e "${GREEN}✅ Remote Cluster resources created${NC}"
+echo -e "${GREEN}✅ Remote Cluster resources verified${NC}"
 echo ""
 
 # Wait for RERC resources to be ready
