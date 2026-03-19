@@ -75,6 +75,12 @@ resource "kubectl_manifest" "redis_enterprise_cluster" {
       # Rack awareness for HA (distributes nodes across AZs)
       rackAwarenessNodeLabel: "topology.kubernetes.io/zone"
 
+      # Security context - Enable automatic resource adjustment for Redis Enterprise 8.x
+      # This grants SYS_RESOURCE capability required by pdns_server and other internal processes
+      securityContext:
+        resourceLimits:
+          allowAutoAdjustment: true
+
       # Additional configuration
       redisEnterpriseImageSpec:
         imagePullPolicy: IfNotPresent
