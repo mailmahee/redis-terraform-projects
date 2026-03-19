@@ -14,11 +14,12 @@ provider "aws" {
   default_tags {
     tags = merge(
       {
-        Project     = var.project
-        Environment = var.environment
-        ManagedBy   = "Terraform"
-        Owner       = var.owner
-        Region      = "region1"
+        Project       = var.project
+        Environment   = var.environment
+        ManagedBy     = "Terraform"
+        owner         = "mahee_gunturu"
+        Region        = "region1"
+        skip_deletion = "yes"
       },
       var.tags
     )
@@ -33,11 +34,12 @@ provider "aws" {
   default_tags {
     tags = merge(
       {
-        Project     = var.project
-        Environment = var.environment
-        ManagedBy   = "Terraform"
-        Owner       = var.owner
-        Region      = "region2"
+        Project       = var.project
+        Environment   = var.environment
+        ManagedBy     = "Terraform"
+        owner         = "mahee_gunturu"
+        Region        = "region2"
+        skip_deletion = "yes"
       },
       var.tags
     )
