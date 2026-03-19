@@ -36,7 +36,6 @@ locals {
     {
       Project     = var.project
       Environment = var.environment
-      Owner       = var.owner
       ClusterName = var.cluster_name
     }
   )
