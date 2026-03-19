@@ -10,6 +10,46 @@
 #==============================================================================
 
 #==============================================================================
+# GET REC CREDENTIALS
+#==============================================================================
+
+data "kubernetes_secret" "rec_credentials" {
+  metadata {
+    name      = var.local_cluster_name
+    namespace = var.namespace
+  }
+
+  depends_on = [var.cluster_ready]
+}
+
+#==============================================================================
+# SECRETS FOR RERC AUTHENTICATION
+#==============================================================================
+
+# Secret for local RERC (points to local cluster credentials)
+resource "kubernetes_secret" "local_rerc_secret" {
+  count = var.create_local_rerc ? 1 : 0
+
+  metadata {
+    name      = "redis-enterprise-${var.local_cluster_name}"
+    namespace = var.namespace
+  }
+
+  data = {
+    username = data.kubernetes_secret.rec_credentials.data["username"]
+    password = data.kubernetes_secret.rec_credentials.data["password"]
+  }
+
+  type = "Opaque"
+
+  depends_on = [var.cluster_ready]
+}
+
+# NOTE: Secret for remote RERC is NOT created here to avoid circular dependency
+# The deploy-crdb.sh script will create the remote RERC secrets after both
+# clusters are deployed
+
+#==============================================================================
 # LOCAL RERC (Points to the local cluster)
 #==============================================================================
 
@@ -30,7 +70,10 @@ resource "kubectl_manifest" "local_rerc" {
       secretName: redis-enterprise-${var.local_cluster_name}
   YAML
 
-  depends_on = [var.cluster_ready]
+  depends_on = [
+    var.cluster_ready,
+    kubernetes_secret.local_rerc_secret
+  ]
 }
 
 #==============================================================================
@@ -55,6 +98,10 @@ resource "kubectl_manifest" "remote_rerc" {
   YAML
 
   depends_on = [var.cluster_ready]
+
+  lifecycle {
+    ignore_changes = [yaml_body]
+  }
 }
 
 #==============================================================================
