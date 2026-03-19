@@ -451,6 +451,16 @@ variable "validate_dns_propagation" {
 }
 
 #==============================================================================
+# ACTIVE-ACTIVE (CRDB) CONFIGURATION
+#==============================================================================
+
+variable "enable_active_active" {
+  description = "Enable Active-Active (CRDB) support by automatically creating RERCs in both regions"
+  type        = bool
+  default     = true
+}
+
+#==============================================================================
 # REDIS FLEX (optional, shared across both regions)
 #==============================================================================
 

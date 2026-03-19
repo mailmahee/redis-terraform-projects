@@ -216,10 +216,11 @@ resource "kubernetes_ingress_v1" "redis_api_tls" {
 }
 
 #==============================================================================
-# REDIS ENTERPRISE API INGRESS (NON-TLS MODE - TESTING)
+# REDIS ENTERPRISE API INGRESS (NON-TLS MODE)
 #==============================================================================
-# Exposes Redis Enterprise API without TLS for testing purposes
-# Only created when TLS mode is disabled and expose_api is true
+# Exposes Redis Enterprise API without TLS termination at ingress
+# SSL passthrough is used - NGINX forwards encrypted traffic to Redis Enterprise
+# The host field is required for proper routing and DNS resolution
 #==============================================================================
 
 resource "kubernetes_ingress_v1" "redis_api_non_tls" {
@@ -231,6 +232,7 @@ resource "kubernetes_ingress_v1" "redis_api_non_tls" {
 
     annotations = {
       "nginx.ingress.kubernetes.io/backend-protocol" = "HTTPS"
+      "nginx.ingress.kubernetes.io/ssl-passthrough"  = "true"
     }
   }
 
@@ -239,7 +241,6 @@ resource "kubernetes_ingress_v1" "redis_api_non_tls" {
 
     rule {
       host = var.api_fqdn
-
       http {
         path {
           path      = "/"

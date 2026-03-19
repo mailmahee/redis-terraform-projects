@@ -141,13 +141,18 @@ fi
 echo -e "${GREEN}✅ Credentials retrieved${NC}"
 echo ""
 
-# Get REC API endpoints from NGINX Ingress (configured via Terraform)
-echo -e "${BLUE}🔍 Using NGINX Ingress API endpoints...${NC}"
+# Get REC API endpoints from NGINX Ingress LoadBalancer
+echo -e "${BLUE}🔍 Getting NGINX Ingress LoadBalancer endpoints...${NC}"
 
-# Note: apiFqdnUrl should NOT include https:// prefix - the operator adds it automatically
-# The NGINX Ingress controller handles TLS termination/passthrough
-REC1_API="${REGION1_API_FQDN}"
-REC2_API="${REGION2_API_FQDN}"
+# Get the actual NLB DNS names from the NGINX Ingress services
+REC1_API=$(kubectl get svc ingress-nginx-controller -n ingress-nginx --context $REGION1_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+REC2_API=$(kubectl get svc ingress-nginx-controller -n ingress-nginx --context $REGION2_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+
+if [ -z "$REC1_API" ] || [ -z "$REC2_API" ]; then
+    echo -e "${RED}❌ Failed to get NGINX Ingress LoadBalancer endpoints${NC}"
+    echo "Please ensure NGINX Ingress is deployed and LoadBalancer is provisioned."
+    exit 1
+fi
 
 echo "  Region 1 API: $REC1_API"
 echo "  Region 2 API: $REC2_API"
@@ -155,10 +160,36 @@ echo -e "${GREEN}✅ API endpoints configured${NC}"
 echo ""
 
 # Create credential secrets for remote clusters
-echo -e "${BLUE}🔐 Creating credential secrets for remote clusters...${NC}"
+echo -e "${BLUE}🔐 Creating credential secrets for RERC resources...${NC}"
+
+# Secret in Region 1 for local RERC (must be named redis-enterprise-<RERC name>)
+cat > "$SCRIPT_DIR/region1-local-secret.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-enterprise-${REGION1_REC_NAME}
+  namespace: $NAMESPACE
+type: Opaque
+stringData:
+  username: "$REC1_USER"
+  password: "$REC1_PASS"
+EOF
 
 # Secret in Region 1 for accessing Region 2 (must be named redis-enterprise-<RERC name>)
 cat > "$SCRIPT_DIR/region2-remote-secret.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-enterprise-${REGION2_REC_NAME}
+  namespace: $NAMESPACE
+type: Opaque
+stringData:
+  username: "$REC2_USER"
+  password: "$REC2_PASS"
+EOF
+
+# Secret in Region 2 for local RERC (must be named redis-enterprise-<RERC name>)
+cat > "$SCRIPT_DIR/region2-local-secret.yaml" <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -183,7 +214,9 @@ stringData:
   password: "$REC1_PASS"
 EOF
 
+kubectl apply -f "$SCRIPT_DIR/region1-local-secret.yaml" --context $REGION1_CONTEXT
 kubectl apply -f "$SCRIPT_DIR/region2-remote-secret.yaml" --context $REGION1_CONTEXT
+kubectl apply -f "$SCRIPT_DIR/region2-local-secret.yaml" --context $REGION2_CONTEXT
 kubectl apply -f "$SCRIPT_DIR/region1-remote-secret.yaml" --context $REGION2_CONTEXT
 
 echo -e "${GREEN}✅ Credential secrets created${NC}"
@@ -204,7 +237,7 @@ spec:
   recNamespace: $NAMESPACE
   apiFqdnUrl: $REC1_API
   dbFqdnSuffix: -db.${REGION1_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: ${REGION1_REC_NAME}
+  secretName: redis-enterprise-${REGION1_REC_NAME}
 EOF
 
 # RERC in Region 1 pointing to Region 2 (remote)
@@ -234,7 +267,7 @@ spec:
   recNamespace: $NAMESPACE
   apiFqdnUrl: $REC2_API
   dbFqdnSuffix: -db.${REGION2_REC_NAME}.${NAMESPACE}.svc.cluster.local
-  secretName: ${REGION2_REC_NAME}
+  secretName: redis-enterprise-${REGION2_REC_NAME}
 EOF
 
 # RERC in Region 2 pointing to Region 1 (remote)

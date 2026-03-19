@@ -18,6 +18,8 @@ resource "kubernetes_secret" "redis_enterprise_admin" {
 }
 
 # Bulletin board configmap required by bootstrapper
+# NOTE: The bulletin board is managed by the Redis Enterprise operator after creation.
+# Terraform only creates it initially with an empty value, then ignores changes.
 resource "kubernetes_config_map" "bulletin_board" {
   metadata {
     name      = "${var.cluster_name}-bulletin-board"
@@ -26,6 +28,10 @@ resource "kubernetes_config_map" "bulletin_board" {
 
   data = {
     BulletinBoard = ""
+  }
+
+  lifecycle {
+    ignore_changes = [data]
   }
 }
 
@@ -84,7 +90,7 @@ resource "kubectl_manifest" "redis_enterprise_cluster" {
         storageClassName: "${var.redis_flex_storage_class}"
         flashDiskSize: ${var.redis_flex_flash_disk_size}
 %{endif~}
-%{if var.enable_ingress~}
+%{if var.enable_ingress && var.api_fqdn_url != "" && var.db_fqdn_suffix != ""~}
 
       # Ingress/Route configuration for external access
       ingressOrRouteSpec:

@@ -125,7 +125,7 @@ module "region1" {
   redis_db_fqdn_suffix = var.region1_redis_db_fqdn_suffix
 
   # DNS Configuration (for automated Route53 DNS record creation)
-  dns_hosted_zone_id       = var.dns_hosted_zone_id
+  dns_hosted_zone_id       = local.effective_zone_id
   dns_ttl                  = var.dns_ttl
   validate_dns_propagation = var.validate_dns_propagation
 
@@ -137,6 +137,14 @@ module "region1" {
   bastion_instance_type   = var.bastion_instance_type
   ec2_key_name            = var.bastion_key_name
   bastion_ssh_cidr_blocks = var.bastion_allowed_cidr_blocks
+
+  # Active-Active (RERC) Configuration
+  enable_active_active  = var.enable_active_active
+  local_api_fqdn        = "api.region1.${var.ingress_domain}"
+  local_db_fqdn_suffix  = ".db.region1.${var.ingress_domain}"
+  remote_cluster_name   = "rec-${local.region2}"
+  remote_api_fqdn       = "api.region2.${var.ingress_domain}"
+  remote_db_fqdn_suffix = ".db.region2.${var.ingress_domain}"
 }
 
 #==============================================================================
@@ -207,7 +215,7 @@ module "region2" {
   redis_db_fqdn_suffix = var.region2_redis_db_fqdn_suffix
 
   # DNS Configuration (for automated Route53 DNS record creation)
-  dns_hosted_zone_id       = var.dns_hosted_zone_id
+  dns_hosted_zone_id       = local.effective_zone_id
   dns_ttl                  = var.dns_ttl
   validate_dns_propagation = var.validate_dns_propagation
 
@@ -219,6 +227,14 @@ module "region2" {
   bastion_instance_type   = var.bastion_instance_type
   ec2_key_name            = var.bastion_key_name
   bastion_ssh_cidr_blocks = var.bastion_allowed_cidr_blocks
+
+  # Active-Active (RERC) Configuration
+  enable_active_active  = var.enable_active_active
+  local_api_fqdn        = "api.region2.${var.ingress_domain}"
+  local_db_fqdn_suffix  = ".db.region2.${var.ingress_domain}"
+  remote_cluster_name   = "rec-${local.region1}"
+  remote_api_fqdn       = "api.region1.${var.ingress_domain}"
+  remote_db_fqdn_suffix = ".db.region1.${var.ingress_domain}"
 }
 
 #==============================================================================

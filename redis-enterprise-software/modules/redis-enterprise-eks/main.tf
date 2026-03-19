@@ -316,8 +316,10 @@ module "external_access" {
   expose_redis_ui       = var.expose_redis_ui
 
   # Redis Enterprise API (for Active-Active)
+  # NOTE: When ingressOrRouteSpec is configured in REC, the operator creates Ingresses automatically
+  # So we set expose_redis_api = false to avoid duplicate Ingress creation by Terraform
   redis_cluster_name = var.cluster_name
-  expose_redis_api   = var.redis_enable_ingress
+  expose_redis_api   = false  # Operator manages API Ingress via ingressOrRouteSpec
   redis_api_fqdn     = var.redis_api_fqdn_url
 
   # Redis Enterprise Databases
@@ -413,4 +415,36 @@ module "bastion" {
   tags = local.tags
 
   depends_on = [module.eks, module.redis_database, module.external_access]
+}
+
+#==============================================================================
+# REDIS ENTERPRISE REMOTE CLUSTER (RERC) MANAGEMENT
+#==============================================================================
+# Creates RERCs for Active-Active (CRDB) replication across regions
+# Uses Route53 FQDNs for both API and database endpoints (required for SSL Passthrough)
+#==============================================================================
+
+module "rerc_management" {
+  source = "./modules/rerc_management"
+
+  count = var.enable_active_active ? 1 : 0
+
+  namespace = module.redis_operator.namespace
+
+  # Local RERC (always created when Active-Active is enabled)
+  create_local_rerc     = true
+  local_cluster_name    = var.cluster_name
+  local_api_fqdn        = var.local_api_fqdn
+  local_db_fqdn_suffix  = var.local_db_fqdn_suffix
+
+  # Remote RERC (created only if remote cluster is specified)
+  create_remote_rerc    = var.remote_cluster_name != ""
+  remote_cluster_name   = var.remote_cluster_name
+  remote_api_fqdn       = var.remote_api_fqdn
+  remote_db_fqdn_suffix = var.remote_db_fqdn_suffix
+
+  # Ensure cluster is ready before creating RERCs
+  cluster_ready = module.redis_cluster.cluster_ready
+
+  depends_on = [module.redis_cluster, module.external_access]
 }

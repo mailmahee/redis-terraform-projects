@@ -576,3 +576,43 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+#==============================================================================
+# ACTIVE-ACTIVE (RERC) CONFIGURATION
+#==============================================================================
+
+variable "enable_active_active" {
+  description = "Enable Active-Active (CRDB) support by creating RERCs"
+  type        = bool
+  default     = false
+}
+
+variable "local_api_fqdn" {
+  description = "Route53 FQDN for local cluster API (e.g., api.region1.redis.local). Required for Active-Active."
+  type        = string
+  default     = ""
+}
+
+variable "local_db_fqdn_suffix" {
+  description = "Route53 FQDN suffix for local cluster databases (e.g., .db.region1.redis.local). Required for Active-Active."
+  type        = string
+  default     = ""
+}
+
+variable "remote_cluster_name" {
+  description = "Name of the remote Redis Enterprise Cluster for Active-Active replication"
+  type        = string
+  default     = ""
+}
+
+variable "remote_api_fqdn" {
+  description = "Route53 FQDN for remote cluster API (e.g., api.region2.redis.local). Required for Active-Active."
+  type        = string
+  default     = ""
+}
+
+variable "remote_db_fqdn_suffix" {
+  description = "Route53 FQDN suffix for remote cluster databases (e.g., .db.region2.redis.local). Required for Active-Active."
+  type        = string
+  default     = ""
+}
