@@ -229,11 +229,13 @@ echo ""
 echo -e "${BLUE}🔗 Verifying Remote Cluster resources...${NC}"
 
 # Verify RERCs exist
-RERC1_EXISTS=$(kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT 2>/dev/null && echo "yes" || echo "no")
-RERC2_EXISTS=$(kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT 2>/dev/null && echo "yes" || echo "no")
+if ! kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT &>/dev/null; then
+    echo -e "${RED}❌ RERC $REGION1_REC_NAME not found in Region 1. Please run 'terraform apply' first.${NC}"
+    exit 1
+fi
 
-if [ "$RERC1_EXISTS" != "yes" ] || [ "$RERC2_EXISTS" != "yes" ]; then
-    echo -e "${RED}❌ RERC resources not found. Please run 'terraform apply' first.${NC}"
+if ! kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT &>/dev/null; then
+    echo -e "${RED}❌ RERC $REGION2_REC_NAME not found in Region 2. Please run 'terraform apply' first.${NC}"
     exit 1
 fi
 
