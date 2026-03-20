@@ -126,6 +126,26 @@ resolve_host() {
     fail "No DNS lookup tool found (dig, host, nslookup, or getent)."
 }
 
+get_route53_zone_id() {
+    aws route53 list-hosted-zones-by-name \
+        --dns-name "$INGRESS_DOMAIN" \
+        --max-items 10 \
+        --profile "$AWS_PROFILE" \
+        --query "HostedZones[?Name == '${INGRESS_DOMAIN}.'] | [0].Id" \
+        --output text 2>/dev/null | sed 's#.*/##'
+}
+
+get_route53_record_target() {
+    local fqdn="$1"
+    local zone_id="$2"
+
+    aws route53 list-resource-record-sets \
+        --hosted-zone-id "$zone_id" \
+        --profile "$AWS_PROFILE" \
+        --query "ResourceRecordSets[?Name == '${fqdn}.'] | [0].ResourceRecords[0].Value" \
+        --output text 2>/dev/null
+}
+
 kubectl_jsonpath() {
     local context="$1"
     local kind="$2"
@@ -201,14 +221,23 @@ try_api_request() {
     local pass="$3"
     local path="$4"
     local response_file="$5"
+    local connect_target="${6:-}"
     local endpoints=(
         "https://${host}${path}"
         "https://${host}:9443${path}"
     )
 
+    local connect_args=()
+    if [ -n "$connect_target" ]; then
+        connect_args=(
+            --connect-to "${host}:443:${connect_target}:443"
+            --connect-to "${host}:9443:${connect_target}:9443"
+        )
+    fi
+
     local endpoint
     for endpoint in "${endpoints[@]}"; do
-        if curl -ksSfu "$user:$pass" "$endpoint" -o "$response_file" --connect-timeout 10 --max-time 30; then
+        if curl -ksSfu "$user:$pass" "${connect_args[@]}" "$endpoint" -o "$response_file" --connect-timeout 10 --max-time 30; then
             if grep -qiE 'html|not found|404 page' "$response_file"; then
                 continue
             fi
@@ -227,20 +256,34 @@ preflight_cluster_api() {
     local requested_shards="$5"
     local license_payload="$TMP_DIR/${cluster_label}-license.json"
     local cluster_payload="$TMP_DIR/${cluster_label}-cluster.json"
+    local route53_zone_id=""
+    local route53_target=""
+    local dns_resolved=false
 
     info "🌐 Verifying DNS for $cluster_label API endpoint ($api_fqdn)..."
-    resolve_host "$api_fqdn" || fail "DNS resolution failed for $cluster_label API endpoint $api_fqdn."
-    success "✅ DNS resolves for $cluster_label API endpoint"
+    if resolve_host "$api_fqdn"; then
+        dns_resolved=true
+        success "✅ DNS resolves for $cluster_label API endpoint"
+    else
+        route53_zone_id="$(get_route53_zone_id)"
+        [ -n "$route53_zone_id" ] || fail "DNS resolution failed for $cluster_label API endpoint $api_fqdn and Route53 zone lookup for $INGRESS_DOMAIN also failed."
+
+        route53_target="$(get_route53_record_target "$api_fqdn" "$route53_zone_id")"
+        [ -n "$route53_target" ] && [ "$route53_target" != "None" ] || fail "DNS resolution failed for $cluster_label API endpoint $api_fqdn and no Route53 record target was found."
+
+        warn "⚠️ Local DNS did not resolve $api_fqdn. Route53 record exists in hosted zone $route53_zone_id and points to $route53_target."
+        warn "⚠️ Continuing with API checks by connecting through the Route53 CNAME target."
+    fi
 
     info "🔐 Probing $cluster_label API for license status..."
-    try_api_request "$api_fqdn" "$user" "$pass" "/v1/license" "$license_payload" || fail "Could not query the $cluster_label license API. Verify ingress, DNS, credentials, and that the REC is licensed."
+    try_api_request "$api_fqdn" "$user" "$pass" "/v1/license" "$license_payload" "$route53_target" || fail "Could not query the $cluster_label license API. Verify ingress, DNS/Route53, credentials, and that the REC is licensed."
 
     if grep -qiE 'expired|invalid|unlicensed|trial expired|license.*error' "$license_payload"; then
         fail "$cluster_label license API indicates the cluster is not licensed and healthy."
     fi
 
     info "📊 Probing $cluster_label API for cluster readiness..."
-    try_api_request "$api_fqdn" "$user" "$pass" "/v1/cluster" "$cluster_payload" || fail "Could not query the $cluster_label cluster API after the license check."
+    try_api_request "$api_fqdn" "$user" "$pass" "/v1/cluster" "$cluster_payload" "$route53_target" || fail "Could not query the $cluster_label cluster API after the license check."
 
     if ! grep -qiE 'node|cluster|uid|name' "$cluster_payload"; then
         fail "$cluster_label cluster API response was not recognized. Refusing to create REAADB without a successful cluster readiness probe."
