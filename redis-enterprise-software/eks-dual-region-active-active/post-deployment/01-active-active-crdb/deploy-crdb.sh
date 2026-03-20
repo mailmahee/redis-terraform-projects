@@ -54,6 +54,34 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
 }
 
+json_has_truthy_error() {
+    local file="$1"
+
+    python3 - "$file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(1)
+
+if isinstance(data, dict):
+    if data.get("expired") is True:
+        sys.exit(0)
+    for key in ("error", "errors", "status"):
+        value = data.get(key)
+        if isinstance(value, str) and any(token in value.lower() for token in ("error", "invalid", "unlicensed", "expired", "failed")):
+            sys.exit(0)
+        if isinstance(value, list) and value:
+            sys.exit(0)
+
+sys.exit(1)
+PY
+}
+
 load_config() {
     [ -f "$CONFIG_FILE" ] || fail "config.env not found at $CONFIG_FILE. Run terraform apply first."
 
@@ -278,7 +306,7 @@ preflight_cluster_api() {
     info "🔐 Probing $cluster_label API for license status..."
     try_api_request "$api_fqdn" "$user" "$pass" "/v1/license" "$license_payload" "$route53_target" || fail "Could not query the $cluster_label license API. Verify ingress, DNS/Route53, credentials, and that the REC is licensed."
 
-    if grep -qiE 'expired|invalid|unlicensed|trial expired|license.*error' "$license_payload"; then
+    if json_has_truthy_error "$license_payload"; then
         fail "$cluster_label license API indicates the cluster is not licensed and healthy."
     fi
 
@@ -289,7 +317,7 @@ preflight_cluster_api() {
         fail "$cluster_label cluster API response was not recognized. Refusing to create REAADB without a successful cluster readiness probe."
     fi
 
-    if grep -qiE 'error|unhealthy|failed' "$cluster_payload"; then
+    if json_has_truthy_error "$cluster_payload"; then
         fail "$cluster_label cluster API reported an unhealthy state."
     fi
 
