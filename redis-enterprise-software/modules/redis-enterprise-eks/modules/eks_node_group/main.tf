@@ -230,6 +230,28 @@ resource "aws_launch_template" "node_group" {
     )
   }
 
+  tag_specifications {
+    resource_type = "volume"
+
+    tags = merge(
+      var.tags,
+      {
+        Name = "${var.cluster_name}-node-root"
+      }
+    )
+  }
+
+  tag_specifications {
+    resource_type = "network-interface"
+
+    tags = merge(
+      var.tags,
+      {
+        Name = "${var.cluster_name}-node-eni"
+      }
+    )
+  }
+
   tags = var.tags
 }
 

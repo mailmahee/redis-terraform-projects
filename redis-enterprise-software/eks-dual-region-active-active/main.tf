@@ -55,6 +55,17 @@ terraform {
 locals {
   region1 = var.region1
   region2 = var.region2
+
+  common_tags = merge(
+    {
+      Project       = var.project
+      Environment   = var.environment
+      ManagedBy     = "Terraform"
+      owner         = var.owner
+      skip_deletion = "yes"
+    },
+    var.tags
+  )
 }
 
 #==============================================================================
@@ -78,7 +89,7 @@ module "region1" {
   project      = var.project
   environment  = var.environment
   owner        = var.owner
-  tags         = var.tags
+  tags         = local.common_tags
 
   # Network Configuration
   vpc_cidr             = var.region1_vpc_cidr
@@ -125,6 +136,7 @@ module "region1" {
   redis_db_fqdn_suffix = var.region1_redis_db_fqdn_suffix
 
   # DNS Configuration (for automated Route53 DNS record creation)
+  create_dns_records       = var.external_access_type == "nginx-ingress" && var.redis_enable_ingress
   dns_hosted_zone_id       = local.effective_zone_id
   dns_ttl                  = var.dns_ttl
   validate_dns_propagation = var.validate_dns_propagation
@@ -168,7 +180,7 @@ module "region2" {
   project      = var.project
   environment  = var.environment
   owner        = var.owner
-  tags         = var.tags
+  tags         = local.common_tags
 
   # Network Configuration
   vpc_cidr             = var.region2_vpc_cidr
@@ -215,6 +227,7 @@ module "region2" {
   redis_db_fqdn_suffix = var.region2_redis_db_fqdn_suffix
 
   # DNS Configuration (for automated Route53 DNS record creation)
+  create_dns_records       = var.external_access_type == "nginx-ingress" && var.redis_enable_ingress
   dns_hosted_zone_id       = local.effective_zone_id
   dns_ttl                  = var.dns_ttl
   validate_dns_propagation = var.validate_dns_propagation
@@ -250,9 +263,12 @@ resource "aws_vpc_peering_connection" "region1_to_region2" {
   peer_region = local.region2
   auto_accept = false
 
-  tags = {
-    Name = "${var.project_prefix}-vpc-peering-r1-to-r2"
-  }
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_prefix}-vpc-peering-r1-to-r2"
+    }
+  )
 }
 
 # Accept the peering connection in region2
@@ -262,9 +278,12 @@ resource "aws_vpc_peering_connection_accepter" "region2_accept" {
   vpc_peering_connection_id = aws_vpc_peering_connection.region1_to_region2.id
   auto_accept               = true
 
-  tags = {
-    Name = "${var.project_prefix}-vpc-peering-r2-accept"
-  }
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_prefix}-vpc-peering-r2-accept"
+    }
+  )
 }
 
 # Add routes in region1 private route tables to region2 VPC
@@ -559,4 +578,3 @@ resource "local_file" "monitoring_loadbalancer_region2" {
   })
   file_permission = "0644"
 }
-

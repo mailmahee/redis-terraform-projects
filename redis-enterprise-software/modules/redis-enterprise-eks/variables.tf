@@ -497,6 +497,12 @@ variable "dns_hosted_zone_id" {
   default     = ""
 }
 
+variable "create_dns_records" {
+  description = "Whether to create Route53 DNS records for ingress endpoints."
+  type        = bool
+  default     = false
+}
+
 variable "dns_ttl" {
   description = "TTL (in seconds) for DNS records created in Route53"
   type        = number

@@ -276,6 +276,12 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
         echo -e "${GREEN}✅ REAADB is active!${NC}"
         break
     fi
+
+    if [ "$STATUS" = "creation-failed" ]; then
+        echo -e "${RED}❌ REAADB creation failed${NC}"
+        kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o yaml
+        exit 1
+    fi
     
     echo "  Status: $STATUS (${ELAPSED}s elapsed)"
     sleep 10
@@ -309,4 +315,3 @@ echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -
 echo ""
 echo "=========================================================================="
 echo ""
-

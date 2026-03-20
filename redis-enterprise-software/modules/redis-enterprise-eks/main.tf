@@ -34,9 +34,11 @@ locals {
   tags = merge(
     var.tags,
     {
-      Project     = var.project
-      Environment = var.environment
-      ClusterName = var.cluster_name
+      Project       = var.project
+      Environment   = var.environment
+      ClusterName   = var.cluster_name
+      owner         = var.owner
+      skip_deletion = "yes"
     }
   )
 }
@@ -350,13 +352,9 @@ module "external_access" {
 module "dns" {
   source = "./modules/dns"
 
-  # Only create DNS records if:
-  # 1. NGINX ingress is enabled
-  # 2. Ingress is enabled on REC
-  # 3. DNS hosted zone ID is provided
-  count = var.external_access_type == "nginx-ingress" && var.redis_enable_ingress && var.dns_hosted_zone_id != "" ? 1 : 0
+  count = var.create_dns_records ? 1 : 0
 
-  create_dns_records    = true
+  create_dns_records    = var.create_dns_records
   dns_hosted_zone_id    = var.dns_hosted_zone_id
   api_fqdn              = var.redis_api_fqdn_url
   db_wildcard_fqdn      = "*${var.redis_db_fqdn_suffix}"

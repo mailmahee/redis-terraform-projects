@@ -13,15 +13,10 @@ provider "aws" {
 
   default_tags {
     tags = merge(
+      local.common_tags,
       {
-        Project       = var.project
-        Environment   = var.environment
-        ManagedBy     = "Terraform"
-        owner         = "mahee_gunturu"
-        Region        = "region1"
-        skip_deletion = "yes"
-      },
-      var.tags
+        Region = "region1"
+      }
     )
   }
 }
@@ -33,15 +28,10 @@ provider "aws" {
 
   default_tags {
     tags = merge(
+      local.common_tags,
       {
-        Project       = var.project
-        Environment   = var.environment
-        ManagedBy     = "Terraform"
-        owner         = "mahee_gunturu"
-        Region        = "region2"
-        skip_deletion = "yes"
-      },
-      var.tags
+        Region = "region2"
+      }
     )
   }
 }
@@ -195,4 +185,3 @@ provider "kubectl" {
     ]
   }
 }
-
