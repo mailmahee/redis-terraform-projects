@@ -3,11 +3,9 @@
 #==============================================================================
 # MASTER DEPLOYMENT SCRIPT
 #==============================================================================
-# This script deploys all components in the correct order:
-# 1. Active-Active CRDB
-# 2. Prometheus Monitoring
-# 3. Automated Backups
-# 4. Redis Monitoring UI
+# This script deploys post-infrastructure components in the correct order.
+# Active-Active CRDB creation is intentionally gated behind a manual license
+# upload in both Redis Enterprise admin UIs.
 #==============================================================================
 
 set -e
@@ -20,6 +18,20 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+confirm_license_checkpoint() {
+    echo ""
+    echo "Manual checkpoint required:"
+    echo "  1. Log in to the Region 1 and Region 2 Redis Enterprise admin UIs"
+    echo "  2. Upload the license in both clusters"
+    echo "  3. Confirm both RECs remain Running after licensing"
+    echo ""
+    read -r -p "Type 'licensed' to continue: " LICENSE_CONFIRMATION
+    if [ "$LICENSE_CONFIRMATION" != "licensed" ]; then
+        echo -e "${RED}❌ License checkpoint not confirmed. Stopping before CRDB creation.${NC}"
+        exit 1
+    fi
+}
 
 echo ""
 echo "=========================================================================="
@@ -115,17 +127,18 @@ echo "==========================================================================
 echo "  Deployment Options"
 echo "=========================================================================="
 echo ""
-echo "1. Deploy Active-Active CRDB only"
+echo "1. Deploy Active-Active CRDB only (post-license)"
 echo "2. Deploy Prometheus Monitoring only"
 echo "3. Deploy Automated Backups only"
 echo "4. Deploy Redis Monitoring UI only"
-echo "5. Deploy ALL components (recommended)"
+echo "5. Deploy CRDB, monitoring, backups, and UI (post-license)"
 echo "6. Exit"
 echo ""
 read -p "Select option [1-6]: " OPTION
 
 case $OPTION in
     1)
+        confirm_license_checkpoint
         echo -e "${BLUE}📦 Deploying Active-Active CRDB...${NC}"
         cd "$SCRIPT_DIR/01-active-active-crdb"
         ./deploy-crdb.sh
@@ -146,6 +159,7 @@ case $OPTION in
         ./deploy.sh
         ;;
     5)
+        confirm_license_checkpoint
         echo -e "${BLUE}📦 Deploying ALL components...${NC}"
         echo ""
         
@@ -181,4 +195,3 @@ echo "==========================================================================
 echo -e "${GREEN}✅ Deployment Complete!${NC}"
 echo "=========================================================================="
 echo ""
-

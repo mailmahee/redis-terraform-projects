@@ -4,314 +4,417 @@
 # ACTIVE-ACTIVE CRDB DEPLOYMENT SCRIPT
 #==============================================================================
 # This script deploys a Redis Enterprise Active-Active database (CRDB)
-# across two regions using configuration from config.env
+# after both Redis Enterprise clusters are licensed and reachable.
 #==============================================================================
 
-set -e
+set -euo pipefail
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/../config.env"
+TMP_DIR="$(mktemp -d)"
+readonly SCRIPT_DIR CONFIG_FILE TMP_DIR
 
-echo ""
-echo "=========================================================================="
-echo "  Active-Active CRDB Deployment"
-echo "=========================================================================="
-echo ""
+cleanup() {
+    rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
-# Load configuration
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo -e "${RED}❌ ERROR: config.env not found at $CONFIG_FILE${NC}"
-    echo "Please run 'terraform apply' first to generate this file."
+log_section() {
+    echo ""
+    echo "=========================================================================="
+    echo "  $1"
+    echo "=========================================================================="
+    echo ""
+}
+
+fail() {
+    echo -e "${RED}❌ $1${NC}" >&2
     exit 1
-fi
+}
 
-echo -e "${BLUE}📋 Loading configuration...${NC}"
-source "$CONFIG_FILE"
+info() {
+    echo -e "${BLUE}$1${NC}"
+}
 
-# Validate required variables
-REQUIRED_VARS=(
-    "PROJECT_PREFIX"
-    "CRDB_NAME"
-    "REGION1_REC_NAME"
-    "REGION2_REC_NAME"
-    "NAMESPACE"
-    "REGION1_CONTEXT"
-    "REGION2_CONTEXT"
-    "CRDB_MEMORY"
-    "CRDB_SHARDS"
-    "CRDB_REPLICATION"
-    "CRDB_PERSISTENCE"
-    "CRDB_EVICTION_POLICY"
-)
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
 
-for var in "${REQUIRED_VARS[@]}"; do
-    if [ -z "${!var}" ]; then
-        echo -e "${RED}❌ Required variable $var is not set${NC}"
-        exit 1
+warn() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
+load_config() {
+    [ -f "$CONFIG_FILE" ] || fail "config.env not found at $CONFIG_FILE. Run terraform apply first."
+
+    info "📋 Loading configuration..."
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+
+    REQUIRED_VARS=(
+        PROJECT_PREFIX
+        AWS_PROFILE
+        AWS_REGION1
+        AWS_REGION2
+        REGION1_CLUSTER_NAME
+        REGION2_CLUSTER_NAME
+        REGION1_REC_NAME
+        REGION2_REC_NAME
+        REGION1_CONTEXT
+        REGION2_CONTEXT
+        NAMESPACE
+        CRDB_NAME
+        CRDB_MEMORY
+        CRDB_SHARDS
+        CRDB_REPLICATION
+        CRDB_PERSISTENCE
+        CRDB_EVICTION_POLICY
+        REGION1_API_FQDN
+        REGION2_API_FQDN
+    )
+
+    for var_name in "${REQUIRED_VARS[@]}"; do
+        [ -n "${!var_name:-}" ] || fail "Required variable $var_name is not set in config.env"
+    done
+
+    [[ "$CRDB_SHARDS" =~ ^[0-9]+$ ]] || fail "CRDB_SHARDS must be an integer. Current value: $CRDB_SHARDS"
+    [ "$CRDB_SHARDS" -gt 0 ] || fail "CRDB_SHARDS must be greater than zero."
+
+    success "✅ Configuration loaded"
+}
+
+configure_kubectl_contexts() {
+    info "🔧 Configuring kubectl contexts..."
+    aws eks update-kubeconfig --region "$AWS_REGION1" --name "$REGION1_CLUSTER_NAME" --alias "$REGION1_CONTEXT" --profile "$AWS_PROFILE" >/dev/null
+    aws eks update-kubeconfig --region "$AWS_REGION2" --name "$REGION2_CLUSTER_NAME" --alias "$REGION2_CONTEXT" --profile "$AWS_PROFILE" >/dev/null
+    success "✅ Kubectl contexts configured"
+}
+
+resolve_host() {
+    local host="$1"
+
+    if command -v dig >/dev/null 2>&1; then
+        dig +short "$host" | grep -q .
+        return
     fi
-done
 
-echo -e "${GREEN}✅ Configuration loaded${NC}"
-echo ""
+    if command -v host >/dev/null 2>&1; then
+        host "$host" >/dev/null 2>&1
+        return
+    fi
 
-# Use full ARN contexts for kubectl
-REGION1_CONTEXT="arn:aws:eks:${AWS_REGION1}:735486936198:cluster/${REGION1_CLUSTER_NAME}"
-REGION2_CONTEXT="arn:aws:eks:${AWS_REGION2}:735486936198:cluster/${REGION2_CLUSTER_NAME}"
+    if command -v nslookup >/dev/null 2>&1; then
+        nslookup "$host" >/dev/null 2>&1
+        return
+    fi
 
-echo "CRDB Configuration:"
-echo "  Name: $CRDB_NAME"
-echo "  Memory: $CRDB_MEMORY"
-echo "  Shards: $CRDB_SHARDS"
-echo "  Replication: $CRDB_REPLICATION"
-echo "  Persistence: $CRDB_PERSISTENCE"
-echo "  Eviction Policy: $CRDB_EVICTION_POLICY"
-echo ""
-echo "Participating Clusters:"
-echo "  Region 1: $REGION1_REC_NAME"
-echo "  Region 2: $REGION2_REC_NAME"
-echo ""
+    if command -v getent >/dev/null 2>&1; then
+        getent hosts "$host" >/dev/null 2>&1
+        return
+    fi
 
-# Generate REAADB manifest from template
-echo -e "${BLUE}📝 Generating REAADB manifest...${NC}"
+    fail "No DNS lookup tool found (dig, host, nslookup, or getent)."
+}
 
-cat > "$SCRIPT_DIR/reaadb.yaml" <<EOF
+kubectl_jsonpath() {
+    local context="$1"
+    local kind="$2"
+    local name="$3"
+    local jsonpath="$4"
+
+    kubectl get "$kind" "$name" -n "$NAMESPACE" --context "$context" -o "jsonpath=$jsonpath" 2>/dev/null || true
+}
+
+wait_for_rec_running() {
+    local context="$1"
+    local rec_name="$2"
+    local region_label="$3"
+    local timeout=900
+    local elapsed=0
+    local status=""
+
+    info "🔍 Waiting for $region_label REC ($rec_name) to reach Running..."
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        status="$(kubectl_jsonpath "$context" rec "$rec_name" '{.status.state}')"
+        if [ "$status" = "Running" ]; then
+            success "✅ $region_label REC is Running"
+            return
+        fi
+
+        echo "  $region_label status: ${status:-pending} (${elapsed}s elapsed)"
+        sleep 15
+        elapsed=$((elapsed + 15))
+    done
+
+    fail "$region_label REC $rec_name did not reach Running within $timeout seconds."
+}
+
+get_rec_credentials() {
+    local context="$1"
+    local rec_name="$2"
+    local prefix="$3"
+
+    local user pass
+    user="$(kubectl get secret "$rec_name" -n "$NAMESPACE" --context "$context" -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || true)"
+    pass="$(kubectl get secret "$rec_name" -n "$NAMESPACE" --context "$context" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
+
+    [ -n "$user" ] || fail "Could not read REC username from secret $rec_name in context $context."
+    [ -n "$pass" ] || fail "Could not read REC password from secret $rec_name in context $context."
+
+    printf -v "${prefix}_USER" '%s' "$user"
+    printf -v "${prefix}_PASS" '%s' "$pass"
+}
+
+check_rerc_ready() {
+    local context="$1"
+    local rerc_name="$2"
+    local label="$3"
+    local status
+
+    kubectl get rerc "$rerc_name" -n "$NAMESPACE" --context "$context" >/dev/null 2>&1 || fail "$label RERC $rerc_name does not exist. Run terraform apply first."
+    status="$(kubectl_jsonpath "$context" rerc "$rerc_name" '{.status.status}')"
+
+    case "$status" in
+        Ready|ready|Running|running|Active|active)
+            success "✅ $label RERC $rerc_name is $status"
+            ;;
+        *)
+            fail "$label RERC $rerc_name is not ready. Current status: ${status:-unknown}"
+            ;;
+    esac
+}
+
+try_api_request() {
+    local host="$1"
+    local user="$2"
+    local pass="$3"
+    local path="$4"
+    local response_file="$5"
+    local endpoints=(
+        "https://${host}${path}"
+        "https://${host}:9443${path}"
+    )
+
+    local endpoint
+    for endpoint in "${endpoints[@]}"; do
+        if curl -ksSfu "$user:$pass" "$endpoint" -o "$response_file" --connect-timeout 10 --max-time 30; then
+            if grep -qiE 'html|not found|404 page' "$response_file"; then
+                continue
+            fi
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+preflight_cluster_api() {
+    local cluster_label="$1"
+    local api_fqdn="$2"
+    local user="$3"
+    local pass="$4"
+    local requested_shards="$5"
+    local license_payload="$TMP_DIR/${cluster_label}-license.json"
+    local cluster_payload="$TMP_DIR/${cluster_label}-cluster.json"
+
+    info "🌐 Verifying DNS for $cluster_label API endpoint ($api_fqdn)..."
+    resolve_host "$api_fqdn" || fail "DNS resolution failed for $cluster_label API endpoint $api_fqdn."
+    success "✅ DNS resolves for $cluster_label API endpoint"
+
+    info "🔐 Probing $cluster_label API for license status..."
+    try_api_request "$api_fqdn" "$user" "$pass" "/v1/license" "$license_payload" || fail "Could not query the $cluster_label license API. Verify ingress, DNS, credentials, and that the REC is licensed."
+
+    if grep -qiE 'expired|invalid|unlicensed|trial expired|license.*error' "$license_payload"; then
+        fail "$cluster_label license API indicates the cluster is not licensed and healthy."
+    fi
+
+    info "📊 Probing $cluster_label API for cluster readiness..."
+    try_api_request "$api_fqdn" "$user" "$pass" "/v1/cluster" "$cluster_payload" || fail "Could not query the $cluster_label cluster API after the license check."
+
+    if ! grep -qiE 'node|cluster|uid|name' "$cluster_payload"; then
+        fail "$cluster_label cluster API response was not recognized. Refusing to create REAADB without a successful cluster readiness probe."
+    fi
+
+    if grep -qiE 'error|unhealthy|failed' "$cluster_payload"; then
+        fail "$cluster_label cluster API reported an unhealthy state."
+    fi
+
+    if [ "$requested_shards" -gt 4 ]; then
+        warn "⚠️ Requested shard count is $requested_shards. Capacity validation is best-effort; API and license preflight succeeded."
+    fi
+
+    success "✅ $cluster_label API preflight passed"
+}
+
+write_secret_manifest() {
+    local path="$1"
+    local secret_name="$2"
+    local user="$3"
+    local pass="$4"
+
+    cat > "$path" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${secret_name}
+  namespace: ${NAMESPACE}
+type: Opaque
+stringData:
+  username: "${user}"
+  password: "${pass}"
+EOF
+}
+
+ensure_remote_credentials() {
+    local region1_local="$TMP_DIR/region1-local-secret.yaml"
+    local region1_remote="$TMP_DIR/region1-remote-secret.yaml"
+    local region2_local="$TMP_DIR/region2-local-secret.yaml"
+    local region2_remote="$TMP_DIR/region2-remote-secret.yaml"
+
+    info "🔐 Applying idempotent RERC credential secrets..."
+
+    write_secret_manifest "$region1_local" "redis-enterprise-${REGION1_REC_NAME}" "$REC1_USER" "$REC1_PASS"
+    write_secret_manifest "$region1_remote" "redis-enterprise-${REGION2_REC_NAME}" "$REC2_USER" "$REC2_PASS"
+    write_secret_manifest "$region2_local" "redis-enterprise-${REGION2_REC_NAME}" "$REC2_USER" "$REC2_PASS"
+    write_secret_manifest "$region2_remote" "redis-enterprise-${REGION1_REC_NAME}" "$REC1_USER" "$REC1_PASS"
+
+    kubectl apply -f "$region1_local" --context "$REGION1_CONTEXT" >/dev/null
+    kubectl apply -f "$region1_remote" --context "$REGION1_CONTEXT" >/dev/null
+    kubectl apply -f "$region2_local" --context "$REGION2_CONTEXT" >/dev/null
+    kubectl apply -f "$region2_remote" --context "$REGION2_CONTEXT" >/dev/null
+
+    success "✅ RERC credential secrets applied"
+}
+
+generate_reaadb_manifest() {
+    REAADB_MANIFEST="$TMP_DIR/reaadb.yaml"
+
+    cat > "$REAADB_MANIFEST" <<EOF
 apiVersion: app.redislabs.com/v1alpha1
 kind: RedisEnterpriseActiveActiveDatabase
 metadata:
-  name: $CRDB_NAME
-  namespace: $NAMESPACE
+  name: ${CRDB_NAME}
+  namespace: ${NAMESPACE}
 spec:
   participatingClusters:
-    - name: $REGION1_REC_NAME
-    - name: $REGION2_REC_NAME
-  
+    - name: ${REGION1_REC_NAME}
+    - name: ${REGION2_REC_NAME}
   globalConfigurations:
-    evictionPolicy: $CRDB_EVICTION_POLICY
-    memorySize: $CRDB_MEMORY
+    evictionPolicy: ${CRDB_EVICTION_POLICY}
+    memorySize: ${CRDB_MEMORY}
     ossCluster: false
-    persistence: $CRDB_PERSISTENCE
-    replication: $CRDB_REPLICATION
-    shardCount: $CRDB_SHARDS
+    persistence: ${CRDB_PERSISTENCE}
+    replication: ${CRDB_REPLICATION}
+    shardCount: ${CRDB_SHARDS}
     type: redis
 EOF
 
-echo -e "${GREEN}✅ Manifest generated: reaadb.yaml${NC}"
-echo ""
+    success "✅ Generated ephemeral REAADB manifest at $REAADB_MANIFEST"
+}
 
-# Verify REC status before deployment
-echo -e "${BLUE}🔍 Verifying Redis Enterprise Clusters...${NC}"
+apply_reaadb() {
+    local existing_status
+    existing_status="$(kubectl get reaadb "$CRDB_NAME" -n "$NAMESPACE" --context "$REGION1_CONTEXT" -o jsonpath='{.status.status}' 2>/dev/null || true)"
 
-REC1_STATUS=$(kubectl get rec $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.state}' 2>/dev/null || echo "NotFound")
-REC2_STATUS=$(kubectl get rec $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.state}' 2>/dev/null || echo "NotFound")
-
-if [ "$REC1_STATUS" != "Running" ]; then
-    echo -e "${RED}❌ REC $REGION1_REC_NAME is not Running (Status: $REC1_STATUS)${NC}"
-    echo "Please ensure the Redis Enterprise Cluster is deployed and running."
-    exit 1
-fi
-
-if [ "$REC2_STATUS" != "Running" ]; then
-    echo -e "${RED}❌ REC $REGION2_REC_NAME is not Running (Status: $REC2_STATUS)${NC}"
-    echo "Please ensure the Redis Enterprise Cluster is deployed and running."
-    exit 1
-fi
-
-echo -e "${GREEN}✅ Both RECs are Running${NC}"
-echo ""
-
-# Get REC credentials
-echo -e "${BLUE}🔐 Getting REC credentials...${NC}"
-REC1_USER=$(kubectl get secret $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || echo "")
-REC1_PASS=$(kubectl get secret $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
-REC2_USER=$(kubectl get secret $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || echo "")
-REC2_PASS=$(kubectl get secret $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")
-
-if [ -z "$REC1_USER" ] || [ -z "$REC1_PASS" ] || [ -z "$REC2_USER" ] || [ -z "$REC2_PASS" ]; then
-    echo -e "${RED}❌ Failed to get REC credentials${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✅ Credentials retrieved${NC}"
-echo ""
-
-# Get REC API endpoints from NGINX Ingress LoadBalancer
-echo -e "${BLUE}🔍 Getting NGINX Ingress LoadBalancer endpoints...${NC}"
-
-# Get the actual NLB DNS names from the NGINX Ingress services
-REC1_API=$(kubectl get svc ingress-nginx-controller -n ingress-nginx --context $REGION1_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-REC2_API=$(kubectl get svc ingress-nginx-controller -n ingress-nginx --context $REGION2_CONTEXT -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-
-if [ -z "$REC1_API" ] || [ -z "$REC2_API" ]; then
-    echo -e "${RED}❌ Failed to get NGINX Ingress LoadBalancer endpoints${NC}"
-    echo "Please ensure NGINX Ingress is deployed and LoadBalancer is provisioned."
-    exit 1
-fi
-
-echo "  Region 1 API: $REC1_API"
-echo "  Region 2 API: $REC2_API"
-echo -e "${GREEN}✅ API endpoints configured${NC}"
-echo ""
-
-# Create credential secrets for remote clusters
-echo -e "${BLUE}🔐 Creating credential secrets for RERC resources...${NC}"
-
-# Secret in Region 1 for local RERC (must be named redis-enterprise-<RERC name>)
-cat > "$SCRIPT_DIR/region1-local-secret.yaml" <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: redis-enterprise-${REGION1_REC_NAME}
-  namespace: $NAMESPACE
-type: Opaque
-stringData:
-  username: "$REC1_USER"
-  password: "$REC1_PASS"
-EOF
-
-# Secret in Region 1 for accessing Region 2 (must be named redis-enterprise-<RERC name>)
-cat > "$SCRIPT_DIR/region2-remote-secret.yaml" <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: redis-enterprise-${REGION2_REC_NAME}
-  namespace: $NAMESPACE
-type: Opaque
-stringData:
-  username: "$REC2_USER"
-  password: "$REC2_PASS"
-EOF
-
-# Secret in Region 2 for local RERC (must be named redis-enterprise-<RERC name>)
-cat > "$SCRIPT_DIR/region2-local-secret.yaml" <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: redis-enterprise-${REGION2_REC_NAME}
-  namespace: $NAMESPACE
-type: Opaque
-stringData:
-  username: "$REC2_USER"
-  password: "$REC2_PASS"
-EOF
-
-# Secret in Region 2 for accessing Region 1 (must be named redis-enterprise-<RERC name>)
-cat > "$SCRIPT_DIR/region1-remote-secret.yaml" <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: redis-enterprise-${REGION1_REC_NAME}
-  namespace: $NAMESPACE
-type: Opaque
-stringData:
-  username: "$REC1_USER"
-  password: "$REC1_PASS"
-EOF
-
-kubectl apply -f "$SCRIPT_DIR/region1-local-secret.yaml" --context $REGION1_CONTEXT
-kubectl apply -f "$SCRIPT_DIR/region2-remote-secret.yaml" --context $REGION1_CONTEXT
-kubectl apply -f "$SCRIPT_DIR/region2-local-secret.yaml" --context $REGION2_CONTEXT
-kubectl apply -f "$SCRIPT_DIR/region1-remote-secret.yaml" --context $REGION2_CONTEXT
-
-echo -e "${GREEN}✅ Credential secrets created${NC}"
-echo ""
-
-# NOTE: RERC resources are now created by Terraform with Route53 FQDNs
-# This script only creates the secrets. If you need to manually create RERCs,
-# uncomment the section below and update the apiFqdnUrl to use Route53 FQDNs.
-
-echo -e "${BLUE}🔗 Verifying Remote Cluster resources...${NC}"
-
-# Verify RERCs exist
-if ! kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT &>/dev/null; then
-    echo -e "${RED}❌ RERC $REGION1_REC_NAME not found in Region 1. Please run 'terraform apply' first.${NC}"
-    exit 1
-fi
-
-if ! kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT &>/dev/null; then
-    echo -e "${RED}❌ RERC $REGION2_REC_NAME not found in Region 2. Please run 'terraform apply' first.${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✅ Remote Cluster resources verified${NC}"
-echo ""
-
-# Wait for RERC resources to be ready
-echo -e "${YELLOW}⏳ Waiting for RERC resources to be ready...${NC}"
-sleep 10
-
-# Verify RERC status
-RERC1_LOCAL=$(kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
-RERC1_REMOTE=$(kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
-RERC2_LOCAL=$(kubectl get rerc $REGION2_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
-RERC2_REMOTE=$(kubectl get rerc $REGION1_REC_NAME -n $NAMESPACE --context $REGION2_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
-
-echo "  Region 1 - Local RERC: $RERC1_LOCAL"
-echo "  Region 1 - Remote RERC (to Region 2): $RERC1_REMOTE"
-echo "  Region 2 - Local RERC: $RERC2_LOCAL"
-echo "  Region 2 - Remote RERC (to Region 1): $RERC2_REMOTE"
-echo ""
-
-# Deploy REAADB
-echo -e "${BLUE}🚀 Deploying Active-Active database...${NC}"
-kubectl apply -f "$SCRIPT_DIR/reaadb.yaml" --context $REGION1_CONTEXT
-
-echo -e "${YELLOW}⏳ Waiting for REAADB to be created...${NC}"
-sleep 10
-
-# Wait for REAADB to be active
-echo -e "${YELLOW}⏳ Waiting for REAADB to become active (this may take 2-3 minutes)...${NC}"
-TIMEOUT=300
-ELAPSED=0
-while [ $ELAPSED -lt $TIMEOUT ]; do
-    STATUS=$(kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o jsonpath='{.status.status}' 2>/dev/null || echo "pending")
-    
-    if [ "$STATUS" = "active" ]; then
-        echo -e "${GREEN}✅ REAADB is active!${NC}"
-        break
+    if [ -n "$existing_status" ]; then
+        warn "⚠️ REAADB $CRDB_NAME already exists with status ${existing_status}. Re-applying manifest idempotently."
     fi
 
-    if [ "$STATUS" = "creation-failed" ]; then
-        echo -e "${RED}❌ REAADB creation failed${NC}"
-        kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o yaml
-        exit 1
-    fi
-    
-    echo "  Status: $STATUS (${ELAPSED}s elapsed)"
-    sleep 10
-    ELAPSED=$((ELAPSED + 10))
-done
+    kubectl apply -f "$REAADB_MANIFEST" --context "$REGION1_CONTEXT" >/dev/null
+    success "✅ REAADB manifest applied"
+}
 
-if [ $ELAPSED -ge $TIMEOUT ]; then
-    echo -e "${RED}❌ Timeout waiting for REAADB to become active${NC}"
-    echo "Check status with: kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o yaml"
-    exit 1
-fi
+wait_for_reaadb() {
+    local timeout=600
+    local elapsed=0
+    local status=""
 
-echo ""
-echo "=========================================================================="
-echo -e "${GREEN}✅ Active-Active CRDB Deployed Successfully!${NC}"
-echo "=========================================================================="
-echo ""
-echo "Database Details:"
-echo "  Name: $CRDB_NAME"
-echo "  Namespace: $NAMESPACE"
-echo ""
-echo "Verification Commands:"
-echo "  # Check REAADB status in Region 1:"
-echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT"
-echo ""
-echo "  # Check REAADB status in Region 2:"
-echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION2_CONTEXT"
-echo ""
-echo "  # Get database connection details:"
-echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o yaml"
-echo ""
-echo "=========================================================================="
-echo ""
+    info "⏳ Waiting for REAADB $CRDB_NAME to become active..."
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        status="$(kubectl get reaadb "$CRDB_NAME" -n "$NAMESPACE" --context "$REGION1_CONTEXT" -o jsonpath='{.status.status}' 2>/dev/null || true)"
+
+        case "$status" in
+            active|Active)
+                success "✅ REAADB is active"
+                return
+                ;;
+            creation-failed|CreationFailed|failed|Failed)
+                kubectl get reaadb "$CRDB_NAME" -n "$NAMESPACE" --context "$REGION1_CONTEXT" -o yaml
+                fail "REAADB creation failed."
+                ;;
+        esac
+
+        echo "  Status: ${status:-pending} (${elapsed}s elapsed)"
+        sleep 15
+        elapsed=$((elapsed + 15))
+    done
+
+    fail "Timed out waiting for REAADB $CRDB_NAME to become active."
+}
+
+main() {
+    log_section "Active-Active CRDB Deployment"
+
+    require_command aws
+    require_command kubectl
+    require_command curl
+    require_command mktemp
+
+    load_config
+
+    echo "CRDB Configuration:"
+    echo "  Name: $CRDB_NAME"
+    echo "  Memory: $CRDB_MEMORY"
+    echo "  Shards: $CRDB_SHARDS"
+    echo "  Replication: $CRDB_REPLICATION"
+    echo "  Persistence: $CRDB_PERSISTENCE"
+    echo "  Eviction Policy: $CRDB_EVICTION_POLICY"
+    echo ""
+    echo "Manual checkpoint:"
+    echo "  Upload the license in both Redis Enterprise admin UIs before continuing."
+    echo ""
+
+    configure_kubectl_contexts
+    wait_for_rec_running "$REGION1_CONTEXT" "$REGION1_REC_NAME" "Region 1"
+    wait_for_rec_running "$REGION2_CONTEXT" "$REGION2_REC_NAME" "Region 2"
+
+    get_rec_credentials "$REGION1_CONTEXT" "$REGION1_REC_NAME" REC1
+    get_rec_credentials "$REGION2_CONTEXT" "$REGION2_REC_NAME" REC2
+
+    ensure_remote_credentials
+
+    info "🔗 Verifying Remote Cluster resources..."
+    check_rerc_ready "$REGION1_CONTEXT" "$REGION1_REC_NAME" "Region 1 local"
+    check_rerc_ready "$REGION1_CONTEXT" "$REGION2_REC_NAME" "Region 1 remote"
+    check_rerc_ready "$REGION2_CONTEXT" "$REGION2_REC_NAME" "Region 2 local"
+    check_rerc_ready "$REGION2_CONTEXT" "$REGION1_REC_NAME" "Region 2 remote"
+
+    preflight_cluster_api "region1" "$REGION1_API_FQDN" "$REC1_USER" "$REC1_PASS" "$CRDB_SHARDS"
+    preflight_cluster_api "region2" "$REGION2_API_FQDN" "$REC2_USER" "$REC2_PASS" "$CRDB_SHARDS"
+
+    generate_reaadb_manifest
+    apply_reaadb
+    wait_for_reaadb
+
+    echo ""
+    echo "Verification Commands:"
+    echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT"
+    echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION2_CONTEXT"
+    echo "  kubectl get reaadb $CRDB_NAME -n $NAMESPACE --context $REGION1_CONTEXT -o yaml"
+    echo ""
+    success "✅ Active-Active CRDB deployed successfully"
+}
+
+main "$@"
