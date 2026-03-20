@@ -53,8 +53,11 @@ terraform {
 #==============================================================================
 
 locals {
-  region1 = var.region1
-  region2 = var.region2
+  region1               = var.region1
+  region2               = var.region2
+  backup_bucket_region1 = var.backup_s3_bucket_name_region1 != "" ? var.backup_s3_bucket_name_region1 : "${var.project_prefix}-redis-backups-${local.region1}"
+  backup_bucket_region2 = var.backup_s3_bucket_name_region2 != "" ? var.backup_s3_bucket_name_region2 : "${var.project_prefix}-redis-backups-${local.region2}"
+  backup_prefix         = trim(var.backup_s3_prefix, "/")
 
   common_tags = merge(
     {
@@ -106,14 +109,14 @@ module "region1" {
   node_disk_size      = var.region1_node_disk_size != null ? var.region1_node_disk_size : var.node_disk_size
 
   # Redis Enterprise Configuration
-  redis_operator_version        = var.redis_operator_version
-  redis_enterprise_version_tag  = var.redis_enterprise_version_tag
-  redis_cluster_nodes           = var.redis_nodes
-  redis_cluster_username        = var.redis_cluster_username
-  redis_cluster_password        = var.redis_cluster_password
-  redis_cluster_memory          = var.redis_node_memory
-  redis_cluster_storage_size    = var.redis_storage_size
-  redis_ui_service_type         = var.redis_ui_service_type
+  redis_operator_version       = var.redis_operator_version
+  redis_enterprise_version_tag = var.redis_enterprise_version_tag
+  redis_cluster_nodes          = var.redis_nodes
+  redis_cluster_username       = var.redis_cluster_username
+  redis_cluster_password       = var.redis_cluster_password
+  redis_cluster_memory         = var.redis_node_memory
+  redis_cluster_storage_size   = var.redis_storage_size
+  redis_ui_service_type        = var.redis_ui_service_type
 
   # Sample Database Configuration
   create_sample_database = var.create_sample_database
@@ -197,14 +200,14 @@ module "region2" {
   node_disk_size      = var.region2_node_disk_size != null ? var.region2_node_disk_size : var.node_disk_size
 
   # Redis Enterprise Configuration
-  redis_operator_version        = var.redis_operator_version
-  redis_enterprise_version_tag  = var.redis_enterprise_version_tag
-  redis_cluster_nodes           = var.redis_nodes
-  redis_cluster_username        = var.redis_cluster_username
-  redis_cluster_password        = var.redis_cluster_password
-  redis_cluster_memory          = var.redis_node_memory
-  redis_cluster_storage_size    = var.redis_storage_size
-  redis_ui_service_type         = var.redis_ui_service_type
+  redis_operator_version       = var.redis_operator_version
+  redis_enterprise_version_tag = var.redis_enterprise_version_tag
+  redis_cluster_nodes          = var.redis_nodes
+  redis_cluster_username       = var.redis_cluster_username
+  redis_cluster_password       = var.redis_cluster_password
+  redis_cluster_memory         = var.redis_node_memory
+  redis_cluster_storage_size   = var.redis_storage_size
+  redis_ui_service_type        = var.redis_ui_service_type
 
   # Sample Database Configuration
   create_sample_database = var.create_sample_database
@@ -350,6 +353,126 @@ resource "kubernetes_secret" "region2_remote_rerc_secret" {
 }
 
 #==============================================================================
+# BACKUP BUCKETS
+#==============================================================================
+
+resource "aws_s3_bucket" "backup_region1" {
+  provider = aws.region1
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket        = local.backup_bucket_region1
+  force_destroy = var.backup_force_destroy
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name    = local.backup_bucket_region1
+      Region  = local.region1
+      Purpose = "redis-backups"
+    }
+  )
+}
+
+resource "aws_s3_bucket" "backup_region2" {
+  provider = aws.region2
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket        = local.backup_bucket_region2
+  force_destroy = var.backup_force_destroy
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name    = local.backup_bucket_region2
+      Region  = local.region2
+      Purpose = "redis-backups"
+    }
+  )
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backup_region1" {
+  provider = aws.region1
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket = aws_s3_bucket.backup_region1[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backup_region2" {
+  provider = aws.region2
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket = aws_s3_bucket.backup_region2[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "backup_region1" {
+  provider = aws.region1
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket                  = aws_s3_bucket.backup_region1[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_public_access_block" "backup_region2" {
+  provider = aws.region2
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket                  = aws_s3_bucket.backup_region2[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "backup_region1" {
+  provider = aws.region1
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket = aws_s3_bucket.backup_region1[0].id
+
+  rule {
+    id     = "expire-backups"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      days = var.backup_retention_days
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "backup_region2" {
+  provider = aws.region2
+  count    = var.create_backup_buckets ? 1 : 0
+
+  bucket = aws_s3_bucket.backup_region2[0].id
+
+  rule {
+    id     = "expire-backups"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      days = var.backup_retention_days
+    }
+  }
+}
+
+#==============================================================================
 # AUTO-GENERATE POST-DEPLOYMENT CONFIGURATION
 #==============================================================================
 
@@ -416,9 +539,13 @@ export INGRESS_DOMAIN="${var.ingress_domain}"
 #------------------------------------------------------------------------------
 # BACKUP CONFIGURATION
 #------------------------------------------------------------------------------
-export S3_BACKUP_BUCKET="${var.project_prefix}-redis-backups"
-export BACKUP_INTERVAL="24h"
-export BACKUP_RETENTION="7"
+export S3_BACKUP_BUCKET_REGION1="${local.backup_bucket_region1}"
+export S3_BACKUP_BUCKET_REGION2="${local.backup_bucket_region2}"
+export S3_BACKUP_PREFIX="${local.backup_prefix}"
+export S3_BACKUP_PATH_REGION1="s3://${local.backup_bucket_region1}${local.backup_prefix != "" ? "/${local.backup_prefix}" : ""}"
+export S3_BACKUP_PATH_REGION2="s3://${local.backup_bucket_region2}${local.backup_prefix != "" ? "/${local.backup_prefix}" : ""}"
+export BACKUP_INTERVAL="${var.backup_interval}"
+export BACKUP_RETENTION_DAYS="${var.backup_retention_days}"
 
 #------------------------------------------------------------------------------
 # MONITORING CONFIGURATION
@@ -474,9 +601,9 @@ resource "local_file" "monitoring_generated_dir_region2" {
 
 # Region 1 - Monitoring YAML files
 resource "local_file" "monitoring_namespace_region1" {
-  count    = var.prometheus_enabled ? 1 : 0
-  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/00-namespace.yaml"
-  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/00-namespace.yaml.tpl", {})
+  count           = var.prometheus_enabled ? 1 : 0
+  filename        = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/00-namespace.yaml"
+  content         = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/00-namespace.yaml.tpl", {})
   file_permission = "0644"
 }
 
@@ -527,12 +654,12 @@ resource "local_file" "monitoring_grafana_region1" {
   count    = var.prometheus_enabled && var.grafana_enabled ? 1 : 0
   filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region1/03-grafana.yaml"
   content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/03-grafana.yaml.tpl", {
-    grafana_replicas        = var.grafana_replicas
-    grafana_memory_request  = var.grafana_memory_request
-    grafana_cpu_request     = var.grafana_cpu_request
-    grafana_memory_limit    = var.grafana_memory_limit
-    grafana_cpu_limit       = var.grafana_cpu_limit
-    grafana_admin_password  = var.grafana_admin_password
+    grafana_replicas           = var.grafana_replicas
+    grafana_memory_request     = var.grafana_memory_request
+    grafana_cpu_request        = var.grafana_cpu_request
+    grafana_memory_limit       = var.grafana_memory_limit
+    grafana_cpu_limit          = var.grafana_cpu_limit
+    grafana_admin_password     = var.grafana_admin_password
     prometheus_scrape_interval = var.prometheus_scrape_interval
   })
   file_permission = "0644"
@@ -549,9 +676,9 @@ resource "local_file" "monitoring_loadbalancer_region1" {
 
 # Region 2 - Monitoring YAML files
 resource "local_file" "monitoring_namespace_region2" {
-  count    = var.prometheus_enabled ? 1 : 0
-  filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/00-namespace.yaml"
-  content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/00-namespace.yaml.tpl", {})
+  count           = var.prometheus_enabled ? 1 : 0
+  filename        = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/00-namespace.yaml"
+  content         = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/00-namespace.yaml.tpl", {})
   file_permission = "0644"
 }
 
@@ -602,12 +729,12 @@ resource "local_file" "monitoring_grafana_region2" {
   count    = var.prometheus_enabled && var.grafana_enabled ? 1 : 0
   filename = "${path.module}/post-deployment/02-prometheus-monitoring/generated/region2/03-grafana.yaml"
   content = templatefile("${path.module}/post-deployment/02-prometheus-monitoring/templates/03-grafana.yaml.tpl", {
-    grafana_replicas        = var.grafana_replicas
-    grafana_memory_request  = var.grafana_memory_request
-    grafana_cpu_request     = var.grafana_cpu_request
-    grafana_memory_limit    = var.grafana_memory_limit
-    grafana_cpu_limit       = var.grafana_cpu_limit
-    grafana_admin_password  = var.grafana_admin_password
+    grafana_replicas           = var.grafana_replicas
+    grafana_memory_request     = var.grafana_memory_request
+    grafana_cpu_request        = var.grafana_cpu_request
+    grafana_memory_limit       = var.grafana_memory_limit
+    grafana_cpu_limit          = var.grafana_cpu_limit
+    grafana_admin_password     = var.grafana_admin_password
     prometheus_scrape_interval = var.prometheus_scrape_interval
   })
   file_permission = "0644"

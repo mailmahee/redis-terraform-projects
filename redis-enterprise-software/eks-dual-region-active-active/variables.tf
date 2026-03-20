@@ -461,6 +461,52 @@ variable "enable_active_active" {
 }
 
 #==============================================================================
+# BACKUP CONFIGURATION
+#==============================================================================
+
+variable "create_backup_buckets" {
+  description = "Create S3 buckets for Redis backups in both regions"
+  type        = bool
+  default     = true
+}
+
+variable "backup_s3_bucket_name_region1" {
+  description = "S3 bucket name for Region 1 Redis backups. Leave empty to use <project_prefix>-redis-backups-<region1>."
+  type        = string
+  default     = ""
+}
+
+variable "backup_s3_bucket_name_region2" {
+  description = "S3 bucket name for Region 2 Redis backups. Leave empty to use <project_prefix>-redis-backups-<region2>."
+  type        = string
+  default     = ""
+}
+
+variable "backup_s3_prefix" {
+  description = "Path prefix inside the backup bucket (for example: backup)"
+  type        = string
+  default     = "backup"
+}
+
+variable "backup_interval" {
+  description = "Backup interval in duration format used by the post-deployment script (for example: 24h)"
+  type        = string
+  default     = "24h"
+}
+
+variable "backup_retention_days" {
+  description = "Number of days to retain S3 backup objects"
+  type        = number
+  default     = 7
+}
+
+variable "backup_force_destroy" {
+  description = "Allow Terraform to destroy the backup bucket even when it contains objects"
+  type        = bool
+  default     = false
+}
+
+#==============================================================================
 # REDIS FLEX (optional, shared across both regions)
 #==============================================================================
 
@@ -664,4 +710,3 @@ variable "alert_redis_connection_threshold" {
   type        = number
   default     = 10000
 }
-
