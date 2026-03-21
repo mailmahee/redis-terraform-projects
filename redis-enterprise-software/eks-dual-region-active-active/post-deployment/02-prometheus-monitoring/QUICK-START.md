@@ -18,7 +18,7 @@ cd redis-enterprise-software/eks-dual-region-active-active/post-deployment/02-pr
 ./deploy-monitoring.sh both
 ```
 
-This deploys Prometheus to both regions but **skips in-cluster Grafana** (you'll use local Grafana instead).
+This deploys Prometheus to both regions but **skips in-cluster Grafana and Prometheus LoadBalancers**. You'll use local Grafana plus port-forwarding instead.
 
 ### Step 3: Port-Forward Both Prometheus Instances
 
@@ -67,7 +67,7 @@ kubectl port-forward -n monitoring svc/prometheus 9091:9090 --context region2
 kubectl get prometheus -n monitoring --context region1
 kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus --context region1
 
-# Grafana
+# Grafana (only if you deployed with --with-grafana)
 kubectl get pods -n monitoring -l app=grafana --context region1
 
 # ServiceMonitor
@@ -87,6 +87,7 @@ Open: http://localhost:9090
 kubectl port-forward -n monitoring svc/grafana 3000:3000 --context region1
 ```
 Open: http://localhost:3000
+Only applies if you deployed with `--with-grafana`. For the default path, use your local Grafana at `http://localhost:3000`.
 
 ### View Prometheus Targets
 
@@ -128,7 +129,7 @@ bdb_crdt_syncer_ingress_bytes_decompressed
 **Solution**: Run `terraform apply` first to generate the config file.
 
 ### "LoadBalancer pending"
-**Solution**: Wait 2-3 minutes for AWS to provision the LoadBalancer.
+**Solution**: Only relevant when using `--with-grafana`. Wait 2-3 minutes for AWS to provision the internal LoadBalancer.
 
 ### "Targets are DOWN"
 **Solution**: 
@@ -138,6 +139,7 @@ bdb_crdt_syncer_ingress_bytes_decompressed
 
 ### "Can't connect to remote Prometheus"
 **Solution**:
+1. This only applies to the in-cluster Grafana dual-region path
 1. Verify VPC peering is active
 2. Check security groups allow port 9090
 3. Verify LoadBalancer is provisioned
@@ -147,10 +149,12 @@ bdb_crdt_syncer_ingress_bytes_decompressed
 ### In Each Region:
 - ✅ Prometheus Operator (manages Prometheus lifecycle)
 - ✅ Prometheus Instance (collects metrics locally)
-- ✅ Grafana (visualization - can be configured for dual-region)
 - ✅ ServiceMonitor (auto-discovers Redis Enterprise)
 - ✅ PrometheusRules (alert definitions)
-- ✅ LoadBalancer (for cross-region Grafana access)
+
+### Optional with `--with-grafana`:
+- ✅ Grafana (in-cluster visualization)
+- ✅ Internal Prometheus LoadBalancer (for cross-region in-cluster Grafana access)
 
 ### Network Configuration:
 - ✅ Cross-namespace monitoring (monitoring → redis-enterprise)
@@ -192,4 +196,3 @@ For detailed documentation, see:
 - [README.md](./README.md) - Complete documentation
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Architecture deep-dive
 - [NETWORK-SECURITY.md](./NETWORK-SECURITY.md) - Security configuration
-

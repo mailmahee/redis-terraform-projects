@@ -12,7 +12,7 @@
 # This should be run AFTER deploying the monitoring stack to both regions
 #==============================================================================
 
-set -e
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,7 +24,15 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/../config.env"
 
-# Parse command line arguments
+fail() {
+    echo -e "${RED}❌ ERROR: $1${NC}" >&2
+    exit 1
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
 GRAFANA_REGION="${1:-region1}"  # Which region's Grafana to configure
 
 echo ""
@@ -47,16 +55,22 @@ if [[ ! "$GRAFANA_REGION" =~ ^(region1|region2)$ ]]; then
 fi
 
 # Load configuration
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo -e "${RED}❌ ERROR: config.env not found at $CONFIG_FILE${NC}"
-    exit 1
-fi
+[ -f "$CONFIG_FILE" ] || fail "config.env not found at $CONFIG_FILE"
 
 source "$CONFIG_FILE"
 
-# Build kubectl contexts
-REGION1_CONTEXT="arn:aws:eks:${AWS_REGION1}:$(aws sts get-caller-identity --query Account --output text):cluster/${REGION1_CLUSTER_NAME}"
-REGION2_CONTEXT="arn:aws:eks:${AWS_REGION2}:$(aws sts get-caller-identity --query Account --output text):cluster/${REGION2_CLUSTER_NAME}"
+require_command aws
+require_command kubectl
+require_command mktemp
+
+[ -n "${AWS_PROFILE:-}" ] || fail "AWS_PROFILE is not set in config.env"
+[ -n "${REGION1_CONTEXT:-}" ] || fail "REGION1_CONTEXT is not set in config.env"
+[ -n "${REGION2_CONTEXT:-}" ] || fail "REGION2_CONTEXT is not set in config.env"
+[ -n "${REGION1_CLUSTER_NAME:-}" ] || fail "REGION1_CLUSTER_NAME is not set in config.env"
+[ -n "${REGION2_CLUSTER_NAME:-}" ] || fail "REGION2_CLUSTER_NAME is not set in config.env"
+
+aws eks update-kubeconfig --region "$AWS_REGION1" --name "$REGION1_CLUSTER_NAME" --alias "$REGION1_CONTEXT" --profile "$AWS_PROFILE" >/dev/null
+aws eks update-kubeconfig --region "$AWS_REGION2" --name "$REGION2_CLUSTER_NAME" --alias "$REGION2_CONTEXT" --profile "$AWS_PROFILE" >/dev/null
 
 echo -e "${BLUE}📋 Configuration:${NC}"
 echo "  Configuring Grafana in: $GRAFANA_REGION"
@@ -94,13 +108,18 @@ if [ -z "$REMOTE_LB" ]; then
     exit 1
 fi
 
+kubectl get deployment grafana -n monitoring --context "$GRAFANA_CONTEXT" >/dev/null 2>&1 || fail "Grafana deployment not found in $GRAFANA_REGION. Deploy monitoring with --with-grafana first."
+
 echo -e "${GREEN}✅ Remote Prometheus LoadBalancer: $REMOTE_LB${NC}"
 echo ""
 
 echo -e "${BLUE}📝 Step 2: Creating Grafana datasource configuration...${NC}"
 
 # Create updated datasource configuration
-cat > /tmp/grafana-datasources-dual.yaml <<EOF
+TMP_DATASOURCES="$(mktemp)"
+trap 'rm -f "$TMP_DATASOURCES"' EXIT
+
+cat > "$TMP_DATASOURCES" <<EOF
 apiVersion: 1
 datasources:
   # Local Prometheus (${LOCAL_REGION})
@@ -132,7 +151,7 @@ echo -e "${BLUE}🔄 Step 3: Updating Grafana ConfigMap...${NC}"
 
 # Update the ConfigMap
 kubectl create configmap grafana-datasources \
-  --from-file=prometheus.yaml=/tmp/grafana-datasources-dual.yaml \
+  --from-file=prometheus.yaml="$TMP_DATASOURCES" \
   --dry-run=client -o yaml | \
   kubectl apply -f - --context $GRAFANA_CONTEXT -n monitoring
 
@@ -147,9 +166,6 @@ kubectl rollout status deployment/grafana -n monitoring --context $GRAFANA_CONTE
 echo -e "${GREEN}✅ Grafana restarted${NC}"
 echo ""
 
-# Cleanup
-rm -f /tmp/grafana-datasources-dual.yaml
-
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}✅ Grafana Configured with Dual Datasources!${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -159,7 +175,8 @@ echo ""
 echo "1. Access Grafana:"
 echo "   kubectl port-forward -n monitoring svc/grafana 3000:3000 --context $GRAFANA_CONTEXT"
 echo "   Open: http://localhost:3000"
-echo "   Username: admin / Password: admin123"
+echo "   Username: admin"
+echo "   Password: kubectl get secret grafana-admin -n monitoring --context $GRAFANA_CONTEXT -o jsonpath='{.data.password}' | base64 -d"
 echo ""
 echo "2. Verify datasources:"
 echo "   - Go to Configuration → Data Sources"
@@ -172,4 +189,3 @@ echo "   - Go to Explore"
 echo "   - Select each datasource and run: redis_up"
 echo "   - You should see metrics from both regions"
 echo ""
-

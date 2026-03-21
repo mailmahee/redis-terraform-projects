@@ -68,9 +68,7 @@ spec:
                   name: grafana-admin
                   key: password
             - name: GF_AUTH_ANONYMOUS_ENABLED
-              value: "true"
-            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
-              value: "Viewer"
+              value: "false"
             - name: GF_SERVER_ROOT_URL
               value: "http://localhost:3000"
           
@@ -140,4 +138,3 @@ metadata:
 type: Opaque
 stringData:
   password: "${grafana_admin_password}"
-

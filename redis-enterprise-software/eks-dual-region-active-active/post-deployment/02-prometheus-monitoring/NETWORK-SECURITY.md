@@ -202,9 +202,8 @@ kubectl port-forward -n monitoring svc/prometheus 9090:9090
 
 ## Security Best Practices
 
-1. **Change Grafana Password**: The default password is `admin123` - change this immediately in production
+1. **Set a Secure Grafana Password**: Configure a strong `grafana_admin_password` value before enabling in-cluster Grafana
 2. **Enable NetworkPolicies**: Restrict traffic to only what's necessary
 3. **Use TLS Certificates**: For production, configure proper TLS certificates instead of `insecureSkipVerify`
 4. **Limit RBAC Permissions**: Review and restrict Prometheus RBAC permissions to minimum required
 5. **Secure Grafana**: Enable authentication, use HTTPS, and configure proper access controls
-

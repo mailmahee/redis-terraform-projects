@@ -680,7 +680,7 @@ variable "redis_metrics_port" {
 variable "redis_metrics_path" {
   description = "Redis Enterprise metrics endpoint path"
   type        = string
-  default     = "/"
+  default     = "/v2"
 }
 
 variable "redis_metrics_scheme" {

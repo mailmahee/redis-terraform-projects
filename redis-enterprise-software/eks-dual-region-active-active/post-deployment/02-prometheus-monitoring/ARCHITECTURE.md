@@ -42,14 +42,14 @@ This document explains the monitoring architecture for a dual-region Active-Acti
 
 ```
 Region 1:
-  Redis Enterprise Cluster (port 8070)
+  Redis Enterprise Cluster (HTTPS port 8070, path /v2)
     ↓ (local scrape)
   Prometheus Instance (Region 1)
     ↓ (stores locally)
   Local Storage (30 days retention)
 
 Region 2:
-  Redis Enterprise Cluster (port 8070)
+  Redis Enterprise Cluster (HTTPS port 8070, path /v2)
     ↓ (local scrape)
   Prometheus Instance (Region 2)
     ↓ (stores locally)
@@ -123,7 +123,7 @@ Prometheus (Region 2) → Shows Region 2 metrics
 
 1. **Cross-Namespace Communication** (monitoring ↔ redis-enterprise)
    - Enabled by default in Kubernetes
-   - Prometheus scrapes Redis Enterprise on port 8070
+   - Prometheus scrapes Redis Enterprise v2 metrics on `https://<prom-metrics-service>:8070/v2`
 
 2. **RBAC Permissions**
    - ClusterRole allows Prometheus to discover services across namespaces
@@ -181,7 +181,7 @@ For production, consider:
 
 ## Security Best Practices
 
-1. **Change Grafana Password**: Default is `admin123` - change immediately!
+1. **Set a Secure Grafana Password**: Use a strong `grafana_admin_password` value before enabling in-cluster Grafana.
 2. **Use Internal LoadBalancers**: Never expose Prometheus to internet
 3. **Enable TLS**: Configure TLS for Prometheus and Grafana in production
 4. **Restrict Security Groups**: Limit access to known IP ranges
@@ -193,7 +193,7 @@ For production, consider:
 ### Grafana Can't Connect to Remote Prometheus
 
 **Check:**
-1. LoadBalancer is provisioned: `kubectl get svc prometheus-external -n monitoring`
+1. LoadBalancer is provisioned: `kubectl get svc prometheus-external -n monitoring` (only for the `--with-grafana` workflow)
 2. VPC peering is active
 3. Security groups allow port 9090
 4. DNS resolution works from Grafana pod
@@ -211,4 +211,3 @@ For production, consider:
 1. ServiceMonitor exists: `kubectl get servicemonitor -n redis-enterprise`
 2. Prometheus targets are UP: Check Prometheus UI → Targets
 3. Redis Enterprise metrics service exists: `kubectl get svc -l redis.io/service=prom-metrics`
-

@@ -551,8 +551,10 @@ export BACKUP_RETENTION_DAYS="${var.backup_retention_days}"
 # MONITORING CONFIGURATION
 #------------------------------------------------------------------------------
 export ENABLE_PROMETHEUS="true"
-export ENABLE_GRAFANA="true"
+export ENABLE_GRAFANA="${var.grafana_enabled}"
 export MONITORING_NAMESPACE="monitoring"
+export PROMETHEUS_OPERATOR_VERSION="${var.prometheus_operator_version}"
+export GRAFANA_ENABLED="${var.grafana_enabled}"
 
 #==============================================================================
 # AUTO-GENERATED VALUES (from Terraform state)

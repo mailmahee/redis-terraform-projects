@@ -80,7 +80,7 @@ alert_redis_connection_threshold = 10000
 # Redis Metrics Configuration
 redis_metrics_port              = 8070
 redis_metrics_scheme            = "https"
-redis_metrics_path              = "/"
+redis_metrics_path              = "/v2"
 ```
 
 ### 2. Generate Configuration Files
@@ -246,4 +246,3 @@ terraform apply
 - [LOCAL-GRAFANA-SETUP.md](./LOCAL-GRAFANA-SETUP.md) - Local Grafana setup guide
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Detailed architecture explanation
 - [NETWORK-SECURITY.md](./NETWORK-SECURITY.md) - Security configuration guide
-
