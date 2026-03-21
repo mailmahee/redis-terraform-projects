@@ -2,7 +2,7 @@
 #==============================================================================
 # MEMTIER BENCHMARK LOAD TEST - ACTIVE-ACTIVE CRDB
 #==============================================================================
-# Generates ~180K ops/sec load against micron-crdb-prod database
+# Generates ~180K ops/sec load against an Active-Active CRDB service
 # - 8 parallel pods (each rate-limited to ~22.5K ops/sec)
 # - Each pod gets unique key range (no overlap, perfect distribution)
 # - 70% reads / 30% writes
@@ -25,6 +25,10 @@
 #   kubectl get pods -l job-name=memtier-load-test -n redis-enterprise -w --context region1
 #   kubectl logs -l job-name=memtier-load-test -n redis-enterprise --tail=-1 --context region1 | grep "Totals"
 #
+# Optional overrides:
+#   kubectl set env job/memtier-load-test -n redis-enterprise \
+#     CRDB_NAME=my-crdb-service REDIS_PORT=12000 --context region1
+#
 # Cleanup:
 #   kubectl delete job memtier-load-test -n redis-enterprise --context region1
 #==============================================================================
@@ -37,7 +41,7 @@ metadata:
   labels:
     app: memtier-benchmark
     test-type: load-generation
-    database: micron-crdb-prod
+    workload: redis-crdb
 spec:
   # Run 8 pods in parallel with indexed completion (0-7)
   parallelism: 8
@@ -73,37 +77,67 @@ spec:
         
         # Environment variables for Redis connection
         env:
+        - name: CRDB_NAME
+          value: ""
         - name: REDIS_HOST
-          value: "micron-crdb-prod.redis-enterprise.svc.cluster.local"
+          value: ""
         - name: REDIS_PORT
-          value: "12190"
-        - name: POD_NAME
+          value: ""
+        - name: JOB_COMPLETION_INDEX
           valueFrom:
             fieldRef:
-              fieldPath: metadata.name
+              fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
         
         # memtier_benchmark command
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -eu
+
+          if [ -z "$CRDB_NAME" ]; then
+            echo "CRDB_NAME must be set"
+            exit 1
+          fi
+
+          SERVICE_ENV_PREFIX=$(echo "$CRDB_NAME" | tr '[:lower:]-.' '[:upper:]__')
+          HOST_VAR="${SERVICE_ENV_PREFIX}_SERVICE_HOST"
+          PORT_VAR="${SERVICE_ENV_PREFIX}_SERVICE_PORT"
+
+          if [ -z "$REDIS_HOST" ]; then
+            REDIS_HOST=$(eval "printf '%s' \"\${$HOST_VAR:-}\"")
+          fi
+
+          if [ -z "$REDIS_PORT" ]; then
+            REDIS_PORT=$(eval "printf '%s' \"\${$PORT_VAR:-}\"")
+          fi
+
+          if [ -z "$REDIS_HOST" ]; then
+            REDIS_HOST="${CRDB_NAME}.redis-enterprise.svc.cluster.local"
+          fi
+
+          if [ -z "$REDIS_PORT" ]; then
+            echo "Could not auto-discover Redis port for service $CRDB_NAME."
+            echo "Set REDIS_PORT explicitly if the service env var is unavailable."
+            exit 1
+          fi
+
+          POD_INDEX="${JOB_COMPLETION_INDEX:-0}"
+          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
+            echo "Invalid job completion index: $POD_INDEX"
+            exit 1
+          fi
+
           echo "=========================================="
           echo "Starting memtier_benchmark Load Test"
-          echo "Pod: $POD_NAME"
+          echo "Completion Index: $POD_INDEX"
           echo "Target: $REDIS_HOST:$REDIS_PORT"
-          echo "Database: micron-crdb-prod (Active-Active CRDB)"
+          echo "Database Service: $CRDB_NAME"
           echo "=========================================="
           echo ""
 
           # Calculate unique key range for this pod
           # Each pod gets 2M keys (1-indexed, memtier doesn't accept key-minimum=0)
-          # Extract pod index from pod name (format: memtier-load-test-0-xxxxx)
-          POD_INDEX=$(echo $POD_NAME | sed 's/memtier-load-test-\([0-9]\+\)-.*/\1/')
-
-          # Validate POD_INDEX is a number, default to 0 if not
-          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
-            echo "Warning: Could not extract pod index from name, defaulting to 0"
-            POD_INDEX=0
-          fi
+          # Indexed jobs expose a stable numeric completion index per pod
 
           KEYS_PER_POD=2000000
           KEY_MIN=$((POD_INDEX * KEYS_PER_POD + 1))
@@ -123,16 +157,16 @@ spec:
           # - Unique key range per pod (no overlap)
 
           memtier_benchmark \
-            --server=$REDIS_HOST \
-            --port=$REDIS_PORT \
+            --server="$REDIS_HOST" \
+            --port="$REDIS_PORT" \
             --protocol=redis \
             --clients=50 \
             --threads=4 \
-            --ratio=1:3 \
+            --ratio=3:7 \
             --data-size=256 \
             --key-pattern=R:R \
-            --key-minimum=$KEY_MIN \
-            --key-maximum=$KEY_MAX \
+            --key-minimum="$KEY_MIN" \
+            --key-maximum="$KEY_MAX" \
             --pipeline=1 \
             --test-time=300 \
             --print-percentiles=50,90,95,99,99.9 \
@@ -143,7 +177,7 @@ spec:
           echo ""
           echo "=========================================="
           echo "Test completed with exit code: $EXIT_CODE"
-          echo "Pod: $POD_NAME"
+          echo "Completion Index: $POD_INDEX"
           echo "=========================================="
           
           exit $EXIT_CODE

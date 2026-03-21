@@ -25,10 +25,15 @@ This directory contains Kubernetes Job manifests for running `memtier_benchmark`
 - 256-byte payload
 - Unique key ranges per pod (no overlap)
 - 5-minute test duration
+- Database service name is configurable via `CRDB_NAME`
+- Database port auto-discovers from the Kubernetes Service when available
 
 **Usage:**
 ```bash
-# Deploy load test
+# Deploy load test with the interactive helper
+./run-memtier-job.sh
+
+# Or apply the manifest directly when the defaults are correct
 kubectl apply -f memtier-load-test-job.yaml --context region1
 
 # Watch pods
@@ -63,11 +68,41 @@ In the memtier command:
 --test-time=300       # Test duration in seconds
 ```
 
+### Target A Different Database
+
+The manifest does not ship with a customer-specific CRDB default. Use the
+interactive helper and provide the required values at runtime.
+
+You can also provide the override non-interactively:
+
+```bash
+  ./run-memtier-job.sh \
+  --manifest memtier-load-test-job.yaml \
+  --context <kube-context> \
+  --crdb-name <your-crdb-service-name>
+```
+
+If Kubernetes cannot auto-discover the service port from the Service env vars,
+also set:
+
+```bash
+  ./run-memtier-job.sh \
+  --manifest memtier-load-test-job.yaml \
+  --context <kube-context> \
+  --crdb-name <your-crdb-service-name> \
+  --redis-port <service-port>
+```
+
+`kubectl set env job/...` is not recommended for these one-shot Jobs after
+creation because the Job pod template is immutable. If you need different
+settings, delete and recreate the Job or use `run-memtier-job.sh`, which does
+that for you.
+
 ### Adjust Read/Write Ratio
 
 ```bash
 --ratio=1:3           # 1 SET : 3 GETs (25% writes, 75% reads)
---ratio=7:3           # 7 GETs : 3 SETs (70% reads, 30% writes)
+--ratio=3:7           # 3 SETs : 7 GETs (30% writes, 70% reads)
 --ratio=1:1           # 50% reads, 50% writes
 ```
 

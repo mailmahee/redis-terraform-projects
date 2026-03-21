@@ -19,7 +19,7 @@ metadata:
   labels:
     app: memtier-benchmark
     test-type: max-throughput
-    database: micron-crdb-prod
+    workload: redis-crdb
 spec:
   parallelism: 16
   completions: 16
@@ -48,30 +48,63 @@ spec:
             memory: "8Gi"
         
         env:
+        - name: CRDB_NAME
+          value: ""
         - name: REDIS_HOST
-          value: "micron-crdb-prod.redis-enterprise.svc.cluster.local"
+          value: ""
         - name: REDIS_PORT
-          value: "12190"
-        - name: POD_NAME
+          value: ""
+        - name: JOB_COMPLETION_INDEX
           valueFrom:
             fieldRef:
-              fieldPath: metadata.name
+              fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
         
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -eu
+
+          if [ -z "$CRDB_NAME" ]; then
+            echo "CRDB_NAME must be set"
+            exit 1
+          fi
+
+          SERVICE_ENV_PREFIX=$(echo "$CRDB_NAME" | tr '[:lower:]-.' '[:upper:]__')
+          HOST_VAR="${SERVICE_ENV_PREFIX}_SERVICE_HOST"
+          PORT_VAR="${SERVICE_ENV_PREFIX}_SERVICE_PORT"
+
+          if [ -z "$REDIS_HOST" ]; then
+            REDIS_HOST=$(eval "printf '%s' \"\${$HOST_VAR:-}\"")
+          fi
+
+          if [ -z "$REDIS_PORT" ]; then
+            REDIS_PORT=$(eval "printf '%s' \"\${$PORT_VAR:-}\"")
+          fi
+
+          if [ -z "$REDIS_HOST" ]; then
+            REDIS_HOST="${CRDB_NAME}.redis-enterprise.svc.cluster.local"
+          fi
+
+          if [ -z "$REDIS_PORT" ]; then
+            echo "Could not auto-discover Redis port for service $CRDB_NAME."
+            echo "Set REDIS_PORT explicitly if the service env var is unavailable."
+            exit 1
+          fi
+
+          POD_INDEX="${JOB_COMPLETION_INDEX:-0}"
+          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
+            echo "Invalid job completion index: $POD_INDEX"
+            exit 1
+          fi
+
           echo "=========================================="
           echo "Starting memtier_benchmark Max Throughput Test"
-          echo "Pod: $POD_NAME"
+          echo "Completion Index: $POD_INDEX"
           echo "Target: $REDIS_HOST:$REDIS_PORT"
+          echo "Database Service: $CRDB_NAME"
           echo "Focus: Maximum sustainable ops/sec"
           echo "=========================================="
           echo ""
-
-          POD_INDEX=$(echo $POD_NAME | sed 's/memtier-max-throughput-\([0-9]\+\)-.*/\1/')
-          if ! echo "$POD_INDEX" | grep -qE '^[0-9]+$'; then
-            POD_INDEX=0
-          fi
 
           KEYS_PER_POD=2000000
           KEY_MIN=$((POD_INDEX * KEYS_PER_POD + 1))
@@ -82,16 +115,16 @@ spec:
           echo ""
 
           memtier_benchmark \
-            --server=$REDIS_HOST \
-            --port=$REDIS_PORT \
+            --server="$REDIS_HOST" \
+            --port="$REDIS_PORT" \
             --protocol=redis \
             --clients=100 \
             --threads=8 \
-            --ratio=1:3 \
+            --ratio=3:7 \
             --data-size=256 \
             --key-pattern=R:R \
-            --key-minimum=$KEY_MIN \
-            --key-maximum=$KEY_MAX \
+            --key-minimum="$KEY_MIN" \
+            --key-maximum="$KEY_MAX" \
             --pipeline=10 \
             --test-time=600 \
             --print-percentiles=50,90,95,99,99.9 \
