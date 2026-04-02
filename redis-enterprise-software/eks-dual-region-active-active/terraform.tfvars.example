@@ -20,11 +20,13 @@ region2_availability_zones = []
 #------------------------------------------------------------------------------
 # BASIC CONFIGURATION
 #------------------------------------------------------------------------------
-user_prefix = "ba"
-cluster_name = "redis-enterprise"
-project = "redis-dual-region"
-environment = "dev"
-owner = "brandon"
+aws_profile    = "default"
+project_prefix = "ba"
+user_prefix    = "ba"
+cluster_name   = "redis-enterprise"
+project        = "redis-dual-region"
+environment    = "dev"
+owner          = "brandon"
 
 #------------------------------------------------------------------------------
 # NETWORK CONFIGURATION
@@ -35,25 +37,87 @@ single_nat_gateway = false  # Use one NAT per AZ for HA
 #------------------------------------------------------------------------------
 # EKS CONFIGURATION (same for both regions)
 #------------------------------------------------------------------------------
-eks_cluster_version = "1.31"
-node_instance_types = ["m5.xlarge"]
-node_desired_size = 3
-node_min_size = 3
-node_max_size = 6
-node_disk_size = 100
+# ⚠️  SIZING GUIDANCE — keep these values consistent with each other:
+#
+#   eks_node_instance_types  →  determines physical RAM and vCPU available per node
+#   eks_node_desired_count   →  node count; must equal redis_nodes (one RE pod per EKS node)
+#   eks_node_min_count       →  node count; must be ≥ redis_nodes — if autoscaling shrinks
+#                                below this, the RE cluster loses a node and becomes degraded
+#   eks_node_max_count       →  node count; safe to set higher for burst, but RE won't use
+#                                extra nodes unless redis_nodes is also increased
+#   redis_node_memory    →  how much of that RAM the RE pod may use (Kubernetes limit)
+#   redis_node_cpu       →  how many vCPUs the RE pod may use (Kubernetes limit)
+#   crdb_memory          →  total dataset size Redis Enterprise must fit in the cluster
+#
+# Rule of thumb:
+#   eks_node_desired_count == eks_node_min_count == redis_nodes  (avoid autoscale below RE cluster size)
+#   crdb_memory (with replication) ≤ redis_node_memory × redis_nodes × ~0.65
+#   (Redis Enterprise reserves ~35% of pod memory for overhead / system buffers)
+#
+# Example — r7i.8xlarge (256 GB RAM, 32 vCPU), 3 nodes, 150 GB CRDB:
+#   eks_node_desired_count = 3  }
+#   eks_node_min_count     = 3  }  lock min node count == desired node count == redis_nodes
+#   redis_nodes            = 3  }
+#   redis_node_memory = "200Gi"   # leaves ~56 GB headroom for OS + K8s per node
+#   redis_node_cpu    = "16"      # half the vCPUs; rest available for OS + K8s
+#   crdb_memory       = "150GB"   # 150 GB ≤ 200 Gi × 3 × 0.65 ≈ 390 GB  ✓
+#
+# Example — r7i.4xlarge (128 GB RAM, 16 vCPU), 3 nodes, 50 GB CRDB:
+#   eks_node_desired_count = 3  }
+#   eks_node_min_count     = 3  }  lock min node count == desired node count == redis_nodes
+#   redis_nodes            = 3  }
+#   redis_node_memory = "90Gi"
+#   redis_node_cpu    = "8"
+#   crdb_memory       = "50GB"    # 50 GB ≤ 90 Gi × 3 × 0.65 ≈ 175 GB   ✓
+#------------------------------------------------------------------------------
+eks_cluster_version = "1.35"
+eks_node_instance_types = ["r7i.8xlarge"]  # Default instance type for both regions
+eks_node_desired_count  = 3                # Node count — must equal redis_nodes
+eks_node_min_count      = 3                # Node count — must be ≥ redis_nodes (see sizing guidance)
+eks_node_max_count      = 6                # Node count — RE won't use extras unless redis_nodes increases
+eks_node_disk_size      = 100
+
+#------------------------------------------------------------------------------
+# REGION-SPECIFIC EKS OVERRIDES (optional)
+#------------------------------------------------------------------------------
+# Uncomment to override EKS settings for specific regions
+# If not specified, the shared defaults above will be used
+
+# Region 1 (us-east-1) overrides
+# region1_eks_node_instance_types = ["r7i.8xlarge"]
+# region1_eks_node_desired_count  = 3
+# region1_eks_node_min_count      = 3
+# region1_eks_node_max_count      = 6
+# region1_eks_node_disk_size      = 100
+
+# Region 2 (us-east-2) overrides - example with different configuration
+# region2_eks_node_instance_types = ["r7i.4xlarge"]  # Smaller instances in region 2
+# region2_eks_node_desired_count  = 5                # More nodes in region 2
+# region2_eks_node_min_count      = 3
+# region2_eks_node_max_count      = 10
+# region2_eks_node_disk_size      = 200              # Larger disks in region 2
 
 #------------------------------------------------------------------------------
 # REDIS ENTERPRISE CONFIGURATION (same for both regions)
 #------------------------------------------------------------------------------
-redis_operator_version = "7.4.6-2.1"
+# See the SIZING GUIDANCE comment above before changing redis_node_memory / redis_node_cpu.
+redis_operator_version       = "v8.0.16-25"
+redis_enterprise_version_tag = "8.0.16-33"  # Must match operator release (see github.com/RedisLabs/redis-enterprise-k8s-docs/releases/tag/v8.0.16-25)
 redis_nodes = 3
 redis_cluster_username = "admin@redis.com"
 redis_cluster_password = "RedisTest123"  # Change this!
-redis_node_memory = "4Gi"
-redis_node_cpu = "2000m"
+redis_node_memory = "4Gi"    # Kubernetes memory limit per RE pod — must fit on node_instance_type
+redis_node_cpu    = "2000m"  # Kubernetes CPU limit per RE pod — must fit on node_instance_type
 redis_persistent_storage = true
 redis_storage_size = "50Gi"
 redis_ui_service_type = "ClusterIP"
+
+#------------------------------------------------------------------------------
+# ACTIVE-ACTIVE DATABASE (CRDB) CONFIGURATION
+#------------------------------------------------------------------------------
+# See the SIZING GUIDANCE comment above before changing crdb_memory / crdb_shards.
+crdb_memory = "1GB"   # Total dataset size; must fit across all RE nodes (see sizing guidance)
+crdb_shards = 1       # Primary shards; total shard processes = crdb_shards × 2 (with replication)
 
 #------------------------------------------------------------------------------
 # SAMPLE DATABASE (optional)

@@ -2,6 +2,12 @@
 # DUAL-REGION VARIABLES
 #==============================================================================
 
+variable "aws_profile" {
+  description = "AWS CLI profile to use for authentication"
+  type        = string
+  default     = "default"
+}
+
 variable "region1" {
   description = "First AWS region"
   type        = string
@@ -41,6 +47,12 @@ variable "region2_availability_zones" {
 #==============================================================================
 # BASIC CONFIGURATION (shared across both regions)
 #==============================================================================
+
+variable "project_prefix" {
+  description = "Short prefix for resource names (e.g. S3 buckets: <project_prefix>-redis-backups-<region>)"
+  type        = string
+  default     = ""
+}
 
 variable "user_prefix" {
   description = "Prefix for resource names"
@@ -102,34 +114,102 @@ variable "eks_cluster_version" {
   default     = "1.31"
 }
 
-variable "node_instance_types" {
-  description = "EC2 instance types for EKS nodes"
+variable "eks_node_instance_types" {
+  description = "EC2 instance types for EKS nodes (default for both regions)"
   type        = list(string)
   default     = ["m5.xlarge"]
 }
 
-variable "node_desired_size" {
-  description = "Desired number of nodes"
+variable "eks_node_desired_count" {
+  description = "Desired number of EKS nodes (default for both regions). Must equal redis_nodes — one RE pod is scheduled per EKS node."
   type        = number
   default     = 3
 }
 
-variable "node_min_size" {
-  description = "Minimum number of nodes"
+variable "eks_node_min_count" {
+  description = "Minimum number of EKS nodes (default for both regions). Must be ≥ redis_nodes; autoscaling below this evicts RE pods and degrades the cluster."
   type        = number
   default     = 3
 }
 
-variable "node_max_size" {
-  description = "Maximum number of nodes"
+variable "eks_node_max_count" {
+  description = "Maximum number of EKS nodes (default for both regions). RE won't use extra nodes unless redis_nodes is also increased."
   type        = number
   default     = 6
 }
 
-variable "node_disk_size" {
-  description = "Disk size for nodes (GB)"
+variable "eks_node_disk_size" {
+  description = "Disk size in GB per EKS node (default for both regions)"
   type        = number
   default     = 100
+}
+
+#==============================================================================
+# REGION 1 EKS OVERRIDES (optional - uses shared defaults if not specified)
+#==============================================================================
+
+variable "region1_eks_node_instance_types" {
+  description = "EC2 instance types for Region 1 EKS nodes (overrides eks_node_instance_types)"
+  type        = list(string)
+  default     = null
+}
+
+variable "region1_eks_node_desired_count" {
+  description = "Desired EKS node count for Region 1 (overrides eks_node_desired_count)"
+  type        = number
+  default     = null
+}
+
+variable "region1_eks_node_min_count" {
+  description = "Minimum EKS node count for Region 1 (overrides eks_node_min_count)"
+  type        = number
+  default     = null
+}
+
+variable "region1_eks_node_max_count" {
+  description = "Maximum EKS node count for Region 1 (overrides eks_node_max_count)"
+  type        = number
+  default     = null
+}
+
+variable "region1_eks_node_disk_size" {
+  description = "Disk size in GB per EKS node for Region 1 (overrides eks_node_disk_size)"
+  type        = number
+  default     = null
+}
+
+#==============================================================================
+# REGION 2 EKS OVERRIDES (optional - uses shared defaults if not specified)
+#==============================================================================
+
+variable "region2_eks_node_instance_types" {
+  description = "EC2 instance types for Region 2 EKS nodes (overrides eks_node_instance_types)"
+  type        = list(string)
+  default     = null
+}
+
+variable "region2_eks_node_desired_count" {
+  description = "Desired EKS node count for Region 2 (overrides eks_node_desired_count)"
+  type        = number
+  default     = null
+}
+
+variable "region2_eks_node_min_count" {
+  description = "Minimum EKS node count for Region 2 (overrides eks_node_min_count)"
+  type        = number
+  default     = null
+}
+
+variable "region2_eks_node_max_count" {
+  description = "Maximum EKS node count for Region 2 (overrides eks_node_max_count)"
+  type        = number
+  default     = null
+}
+
+variable "region2_eks_node_disk_size" {
+  description = "Disk size in GB per EKS node for Region 2 (overrides eks_node_disk_size)"
+  type        = number
+  default     = null
 }
 
 #==============================================================================
@@ -140,6 +220,12 @@ variable "redis_operator_version" {
   description = "Redis Enterprise operator version"
   type        = string
   default     = "7.4.6-2.1"
+}
+
+variable "redis_enterprise_version_tag" {
+  description = "Redis Enterprise container image tag. Must match the operator release (see github.com/RedisLabs/redis-enterprise-k8s-docs/releases)."
+  type        = string
+  default     = "8.0.16-33"
 }
 
 variable "redis_nodes" {
@@ -371,6 +457,74 @@ variable "validate_dns_propagation" {
 }
 
 #==============================================================================
+# ACTIVE-ACTIVE (CRDB) CONFIGURATION
+#==============================================================================
+
+variable "enable_active_active" {
+  description = "Enable Active-Active (CRDB) support by automatically creating RERCs in both regions"
+  type        = bool
+  default     = true
+}
+
+variable "crdb_memory" {
+  description = "Total memory size for the Active-Active database (e.g., 150GB). Must fit within redis_node_memory × redis_nodes, accounting for replication overhead."
+  type        = string
+  default     = "150GB"
+}
+
+variable "crdb_shards" {
+  description = "Number of primary shards for the Active-Active database. Total shard processes = crdb_shards × 2 (with replication). Distribute evenly across redis_nodes."
+  type        = number
+  default     = 6
+}
+
+#==============================================================================
+# BACKUP CONFIGURATION
+#==============================================================================
+
+variable "create_backup_buckets" {
+  description = "Create S3 buckets for Redis backups in both regions"
+  type        = bool
+  default     = true
+}
+
+variable "backup_s3_bucket_name_region1" {
+  description = "S3 bucket name for Region 1 Redis backups. Leave empty to use <project_prefix>-redis-backups-<region1>."
+  type        = string
+  default     = ""
+}
+
+variable "backup_s3_bucket_name_region2" {
+  description = "S3 bucket name for Region 2 Redis backups. Leave empty to use <project_prefix>-redis-backups-<region2>."
+  type        = string
+  default     = ""
+}
+
+variable "backup_s3_prefix" {
+  description = "Path prefix inside the backup bucket (for example: backup)"
+  type        = string
+  default     = "backup"
+}
+
+variable "backup_interval" {
+  description = "Backup interval in duration format used by the post-deployment script (for example: 24h)"
+  type        = string
+  default     = "24h"
+}
+
+variable "backup_retention_days" {
+  description = "Number of days to retain S3 backup objects"
+  type        = number
+  default     = 7
+}
+
+variable "backup_force_destroy" {
+  description = "Allow Terraform to destroy the backup bucket even when it contains objects"
+  type        = bool
+  default     = false
+}
+
+#==============================================================================
 # REDIS FLEX (optional, shared across both regions)
 #==============================================================================
 
@@ -406,5 +560,162 @@ variable "bastion_allowed_cidr_blocks" {
   description = "CIDR blocks allowed to SSH to bastion"
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+#==============================================================================
+# PROMETHEUS MONITORING
+#==============================================================================
+
+variable "prometheus_enabled" {
+  description = "Enable Prometheus monitoring stack (generates YAML files in post-deployment/02-prometheus-monitoring/generated/)"
+  type        = bool
+  default     = false
+}
+
+variable "prometheus_operator_version" {
+  description = "Version of the kube-prometheus-stack Helm chart to deploy"
+  type        = string
+  default     = "v0.72.0"
+}
+
+variable "prometheus_replicas" {
+  description = "Number of Prometheus replicas"
+  type        = number
+  default     = 1
+}
+
+variable "prometheus_memory_request" {
+  description = "Memory request for Prometheus pods"
+  type        = string
+  default     = "512Mi"
+}
+
+variable "prometheus_cpu_request" {
+  description = "CPU request for Prometheus pods"
+  type        = string
+  default     = "250m"
+}
+
+variable "prometheus_memory_limit" {
+  description = "Memory limit for Prometheus pods"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "prometheus_cpu_limit" {
+  description = "CPU limit for Prometheus pods"
+  type        = string
+  default     = "500m"
+}
+
+variable "prometheus_storage_size" {
+  description = "PVC storage size for Prometheus TSDB"
+  type        = string
+  default     = "10Gi"
+}
+
+variable "prometheus_retention" {
+  description = "How long Prometheus retains metrics data"
+  type        = string
+  default     = "15d"
+}
+
+variable "prometheus_scrape_interval" {
+  description = "How frequently Prometheus scrapes targets"
+  type        = string
+  default     = "30s"
+}
+
+variable "prometheus_scrape_timeout" {
+  description = "Scrape request timeout"
+  type        = string
+  default     = "10s"
+}
+
+variable "prometheus_evaluation_interval" {
+  description = "How frequently Prometheus evaluates rules"
+  type        = string
+  default     = "30s"
+}
+
+#==============================================================================
+# GRAFANA
+#==============================================================================
+
+variable "grafana_enabled" {
+  description = "Enable Grafana as part of the monitoring stack"
+  type        = bool
+  default     = false
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password (sensitive)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "grafana_replicas" {
+  description = "Number of Grafana replicas"
+  type        = number
+  default     = 1
+}
+
+variable "grafana_memory_request" {
+  description = "Memory request for Grafana pods"
+  type        = string
+  default     = "256Mi"
+}
+
+variable "grafana_cpu_request" {
+  description = "CPU request for Grafana pods"
+  type        = string
+  default     = "250m"
+}
+
+variable "grafana_memory_limit" {
+  description = "Memory limit for Grafana pods"
+  type        = string
+  default     = "512Mi"
+}
+
+variable "grafana_cpu_limit" {
+  description = "CPU limit for Grafana pods"
+  type        = string
+  default     = "500m"
+}
+
+#==============================================================================
+# REDIS METRICS / ALERTS
+#==============================================================================
+
+variable "redis_metrics_scheme" {
+  description = "Scheme used to scrape Redis Enterprise metrics endpoint (https or http)"
+  type        = string
+  default     = "https"
+}
+
+variable "redis_metrics_path" {
+  description = "Path for the Redis Enterprise metrics scrape endpoint"
+  type        = string
+  default     = "/metrics"
+}
+
+variable "alert_redis_memory_threshold" {
+  description = "Memory usage percentage threshold that triggers a Redis alert"
+  type        = number
+  default     = 80
+}
+
+variable "alert_redis_cpu_threshold" {
+  description = "CPU usage percentage threshold that triggers a Redis alert"
+  type        = number
+  default     = 80
+}
+
+variable "alert_redis_connection_threshold" {
+  description = "Connection count threshold that triggers a Redis alert"
+  type        = number
+  default     = 1000
 }
 
