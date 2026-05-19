@@ -40,6 +40,12 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
+variable "aws_profile" {
+  description = "AWS CLI profile to use for authentication"
+  type        = string
+  default     = "default"
+}
+
 variable "availability_zones" {
   description = "List of availability zones to use. If empty, will auto-select based on region"
   type        = list(string)

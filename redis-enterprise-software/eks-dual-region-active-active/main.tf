@@ -87,6 +87,7 @@ module "region1" {
 
   # Basic Configuration
   aws_region   = local.region1
+  aws_profile  = var.aws_profile
   user_prefix  = "${var.project_prefix}-r1"
   cluster_name = "rec-${local.region1}" # Will become: <project_prefix>-rec-<region>
   project      = var.project
@@ -178,6 +179,7 @@ module "region2" {
 
   # Basic Configuration
   aws_region   = local.region2
+  aws_profile  = var.aws_profile
   user_prefix  = "${var.project_prefix}-r2"
   cluster_name = "rec-${local.region2}" # Will become: <project_prefix>-rec-<region>
   project      = var.project

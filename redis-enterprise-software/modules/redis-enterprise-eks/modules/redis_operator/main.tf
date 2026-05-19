@@ -23,12 +23,13 @@ resource "null_resource" "redis_enterprise_operator" {
     namespace        = kubernetes_namespace.redis_enterprise.metadata[0].name
     cluster_name     = var.cluster_name
     aws_region       = var.aws_region
+    aws_profile      = var.aws_profile
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       KUBEFILE=$(mktemp)
-      aws eks update-kubeconfig --region ${var.aws_region} --name ${var.cluster_name} --kubeconfig $KUBEFILE --alias ${var.cluster_name}
+      aws eks update-kubeconfig --region ${var.aws_region} --name ${var.cluster_name} --kubeconfig $KUBEFILE --alias ${var.cluster_name} --profile ${var.aws_profile}
       kubectl apply -n ${kubernetes_namespace.redis_enterprise.metadata[0].name} \
         -f https://raw.githubusercontent.com/RedisLabs/redis-enterprise-k8s-docs/${var.operator_version}/bundle.yaml \
         --validate=false \
@@ -41,7 +42,7 @@ resource "null_resource" "redis_enterprise_operator" {
     on_failure = continue
     command    = <<-EOT
       KUBEFILE=$(mktemp)
-      aws eks update-kubeconfig --region ${self.triggers.aws_region} --name ${self.triggers.cluster_name} --kubeconfig $KUBEFILE --alias ${self.triggers.cluster_name}
+      aws eks update-kubeconfig --region ${self.triggers.aws_region} --name ${self.triggers.cluster_name} --kubeconfig $KUBEFILE --alias ${self.triggers.cluster_name} --profile ${self.triggers.aws_profile}
 
       echo "=========================================="
       echo "Deleting Redis Enterprise resources in correct order..."

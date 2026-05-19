@@ -25,6 +25,7 @@ cluster_name = "redis-enterprise"
 project = "redis-dual-region"
 environment = "dev"
 owner = "mahee_gunturu"
+aws_profile = "default"             # AWS CLI profile to use (e.g., "default", "eks", "prod")
 
 #------------------------------------------------------------------------------
 # NETWORK CONFIGURATION
@@ -65,7 +66,7 @@ node_disk_size      = 100
 #------------------------------------------------------------------------------
 # REDIS ENTERPRISE CONFIGURATION (same for both regions)
 #------------------------------------------------------------------------------
-redis_operator_version = "7.4.6-2.1"
+redis_operator_version = "v8.0.16-25"
 redis_nodes = 3
 redis_cluster_username = "admin@redis.com"
 redis_cluster_password = "RedisTest123"  # Change this!

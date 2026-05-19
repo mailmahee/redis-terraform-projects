@@ -171,6 +171,7 @@ module "redis_operator" {
   operator_version = var.redis_operator_version
   cluster_name     = module.eks.cluster_name
   aws_region       = var.aws_region
+  aws_profile      = var.aws_profile
 
   depends_on = [module.ebs_csi_driver]
 }
